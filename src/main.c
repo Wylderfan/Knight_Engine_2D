@@ -32,10 +32,12 @@
 #define PLAYER_START_X ((WINDOW_WIDTH - SPRITE_WIDTH) / 2.0f)
 #define PLAYER_START_Y ((WINDOW_HEIGHT - SPRITE_HEIGHT) / 2.0f)
 
-/* Frame rate control */
-#define TARGET_FPS    60
-#define FRAME_DELAY   (1000 / TARGET_FPS)
+/* Frame rate control (VSYNC handles actual timing) */
 #define MAX_DELTA_TIME 0.1f  /* Cap delta time to prevent large jumps */
+
+/* FPS counter settings */
+#define FPS_UPDATE_INTERVAL 500  /* Update FPS display every N milliseconds */
+#define FPS_DISPLAY_ENABLED 1    /* Set to 0 to disable FPS in window title */
 
 /* Asset paths */
 #define PLAYER_TEXTURE_PATH "assets/player.png"
@@ -401,6 +403,11 @@ int main(int argc, char *argv[]) {
 
     Uint32 last_time = SDL_GetTicks();
 
+    /* FPS counter variables */
+    Uint32 fps_last_time = SDL_GetTicks();
+    int frame_count = 0;
+    float current_fps = 0.0f;
+
     /* Main game loop */
     while (game.running) {
         /* Calculate delta time (time since last frame in seconds) */
@@ -413,6 +420,22 @@ int main(int argc, char *argv[]) {
             delta_time = MAX_DELTA_TIME;
         }
 
+        /* FPS calculation and display */
+        frame_count++;
+#if FPS_DISPLAY_ENABLED
+        if (current_time - fps_last_time >= FPS_UPDATE_INTERVAL) {
+            current_fps = frame_count * 1000.0f / (current_time - fps_last_time);
+            frame_count = 0;
+            fps_last_time = current_time;
+
+            /* Display FPS in window title */
+            char title_buffer[128];
+            snprintf(title_buffer, sizeof(title_buffer), "%s - %.1f FPS",
+                     WINDOW_TITLE, current_fps);
+            SDL_SetWindowTitle(game.window, title_buffer);
+        }
+#endif
+
         /* Game loop phases */
         game_handle_events(&game);
         game_process_input(&game);
@@ -420,15 +443,13 @@ int main(int argc, char *argv[]) {
         game_render(&game);
 
         /*
-         * Frame rate limiting
-         * SDL_Delay gives CPU back to OS while waiting.
-         * Note: VSYNC in the renderer also helps limit frame rate.
+         * Frame rate is controlled by VSYNC (SDL_RENDERER_PRESENTVSYNC).
+         * SDL_RenderPresent blocks until the next monitor refresh,
+         * ensuring smooth 60 FPS without manual timing.
          */
-        Uint32 frame_time = SDL_GetTicks() - current_time;
-        if (frame_time < FRAME_DELAY) {
-            SDL_Delay(FRAME_DELAY - frame_time);
-        }
     }
+
+    (void)current_fps; /* Suppress unused warning when FPS_DISPLAY_ENABLED=0 */
 
     game_cleanup(&game);
     return 0;
