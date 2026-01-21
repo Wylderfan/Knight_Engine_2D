@@ -14,7 +14,12 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-/* Window dimensions */
+/* ============================================================================
+ * CONFIGURATION - Adjust these values to customize game behavior
+ * ============================================================================ */
+
+/* Window settings */
+#define WINDOW_TITLE  "Knight Engine 2D - Sprite Demo"
 #define WINDOW_WIDTH  800
 #define WINDOW_HEIGHT 600
 
@@ -23,18 +28,47 @@
 #define SPRITE_HEIGHT 64
 #define SPRITE_SPEED  300.0f  /* Pixels per second */
 
+/* Player starting position (center of screen if not specified) */
+#define PLAYER_START_X ((WINDOW_WIDTH - SPRITE_WIDTH) / 2.0f)
+#define PLAYER_START_Y ((WINDOW_HEIGHT - SPRITE_HEIGHT) / 2.0f)
+
 /* Frame rate control */
 #define TARGET_FPS    60
 #define FRAME_DELAY   (1000 / TARGET_FPS)
+#define MAX_DELTA_TIME 0.1f  /* Cap delta time to prevent large jumps */
 
-/* Colors (RGBA format) */
-#define COLOR_GRASS_R 34
-#define COLOR_GRASS_G 139
-#define COLOR_GRASS_B 34
+/* Asset paths */
+#define PLAYER_TEXTURE_PATH "assets/player.png"
 
+/* Background color (RGB) - grass green */
+#define COLOR_BG_R 34
+#define COLOR_BG_G 139
+#define COLOR_BG_B 34
+
+/* Player sprite fallback color (RGB) - royal blue */
 #define COLOR_PLAYER_R 65
 #define COLOR_PLAYER_G 105
 #define COLOR_PLAYER_B 225
+
+/* ============================================================================
+ * KEY BINDINGS - Customize controls here
+ * Uses SDL_SCANCODE_* values (physical key positions)
+ * ============================================================================ */
+
+/* Movement keys (primary) */
+#define KEY_MOVE_UP     SDL_SCANCODE_UP
+#define KEY_MOVE_DOWN   SDL_SCANCODE_DOWN
+#define KEY_MOVE_LEFT   SDL_SCANCODE_LEFT
+#define KEY_MOVE_RIGHT  SDL_SCANCODE_RIGHT
+
+/* Movement keys (alternate - WASD) */
+#define KEY_MOVE_UP_ALT     SDL_SCANCODE_W
+#define KEY_MOVE_DOWN_ALT   SDL_SCANCODE_S
+#define KEY_MOVE_LEFT_ALT   SDL_SCANCODE_A
+#define KEY_MOVE_RIGHT_ALT  SDL_SCANCODE_D
+
+/* Menu/system keys (uses SDLK_* for key symbols) */
+#define KEY_QUIT SDLK_ESCAPE
 
 /*
  * Player structure - holds position and velocity
@@ -109,16 +143,16 @@ static SDL_Texture *create_colored_texture(SDL_Renderer *renderer,
 static SDL_Texture *load_player_texture(SDL_Renderer *renderer) {
     SDL_Texture *texture = NULL;
 
-    /* Try to load player.png from assets folder */
-    texture = IMG_LoadTexture(renderer, "assets/player.png");
+    /* Try to load texture from configured path */
+    texture = IMG_LoadTexture(renderer, PLAYER_TEXTURE_PATH);
 
     if (texture) {
-        printf("Loaded player texture from assets/player.png\n");
+        printf("Loaded player texture from %s\n", PLAYER_TEXTURE_PATH);
         return texture;
     }
 
     /* Fallback: create a colored rectangle */
-    printf("player.png not found, creating programmatic sprite\n");
+    printf("%s not found, creating programmatic sprite\n", PLAYER_TEXTURE_PATH);
     texture = create_colored_texture(renderer, SPRITE_WIDTH, SPRITE_HEIGHT,
                                      COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
 
@@ -148,7 +182,7 @@ static bool game_init(game_state_t *game) {
 
     /* Create the game window */
     game->window = SDL_CreateWindow(
-        "Knight Engine 2D - Sprite Demo",   /* title */
+        WINDOW_TITLE,                       /* title */
         SDL_WINDOWPOS_CENTERED,             /* x position */
         SDL_WINDOWPOS_CENTERED,             /* y position */
         WINDOW_WIDTH,
@@ -185,9 +219,9 @@ static bool game_init(game_state_t *game) {
         return false;
     }
 
-    /* Initialize player position (center of screen) */
-    game->player.x = (WINDOW_WIDTH - SPRITE_WIDTH) / 2.0f;
-    game->player.y = (WINDOW_HEIGHT - SPRITE_HEIGHT) / 2.0f;
+    /* Initialize player position */
+    game->player.x = PLAYER_START_X;
+    game->player.y = PLAYER_START_Y;
     game->player.vel_x = 0.0f;
     game->player.vel_y = 0.0f;
     game->player.width = SPRITE_WIDTH;
@@ -238,7 +272,7 @@ static void game_handle_events(game_state_t *game) {
 
             case SDL_KEYDOWN:
                 /* Handle single key press events */
-                if (event.key.keysym.sym == SDLK_ESCAPE) {
+                if (event.key.keysym.sym == KEY_QUIT) {
                     game->running = false;
                 }
                 break;
@@ -260,17 +294,17 @@ static void game_process_input(game_state_t *game) {
     game->player.vel_x = 0.0f;
     game->player.vel_y = 0.0f;
 
-    /* Check arrow keys and set velocity */
-    if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) {
+    /* Check movement keys and set velocity */
+    if (keys[KEY_MOVE_UP] || keys[KEY_MOVE_UP_ALT]) {
         game->player.vel_y = -SPRITE_SPEED;
     }
-    if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) {
+    if (keys[KEY_MOVE_DOWN] || keys[KEY_MOVE_DOWN_ALT]) {
         game->player.vel_y = SPRITE_SPEED;
     }
-    if (keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A]) {
+    if (keys[KEY_MOVE_LEFT] || keys[KEY_MOVE_LEFT_ALT]) {
         game->player.vel_x = -SPRITE_SPEED;
     }
-    if (keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D]) {
+    if (keys[KEY_MOVE_RIGHT] || keys[KEY_MOVE_RIGHT_ALT]) {
         game->player.vel_x = SPRITE_SPEED;
     }
 }
@@ -311,9 +345,9 @@ static void game_update(game_state_t *game, float delta_time) {
  * 3. Present the frame (swap buffers to display)
  */
 static void game_render(game_state_t *game) {
-    /* Set background color (grass green) and clear screen */
+    /* Set background color and clear screen */
     SDL_SetRenderDrawColor(game->renderer,
-                           COLOR_GRASS_R, COLOR_GRASS_G, COLOR_GRASS_B, 255);
+                           COLOR_BG_R, COLOR_BG_G, COLOR_BG_B, 255);
     SDL_RenderClear(game->renderer);
 
     /* Define where to draw the player sprite */
@@ -367,8 +401,8 @@ int main(int argc, char *argv[]) {
         last_time = current_time;
 
         /* Cap delta time to prevent huge jumps (e.g., after breakpoints) */
-        if (delta_time > 0.1f) {
-            delta_time = 0.1f;
+        if (delta_time > MAX_DELTA_TIME) {
+            delta_time = MAX_DELTA_TIME;
         }
 
         /* Game loop phases */
