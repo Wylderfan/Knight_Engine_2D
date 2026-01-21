@@ -5,3 +5,5 @@
 *.dll
 *.so
 *.dylib
+.claude
+CLAUDE.md
