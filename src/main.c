@@ -147,6 +147,8 @@ static SDL_Texture *load_player_texture(SDL_Renderer *renderer) {
     texture = IMG_LoadTexture(renderer, PLAYER_TEXTURE_PATH);
 
     if (texture) {
+        /* Enable alpha blending for transparency */
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
         printf("Loaded player texture from %s\n", PLAYER_TEXTURE_PATH);
         return texture;
     }
