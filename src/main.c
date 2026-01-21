@@ -71,8 +71,9 @@
 #define KEY_QUIT SDLK_ESCAPE
 
 /*
- * Player structure - holds position and velocity
- * Using floats for smooth sub-pixel movement
+ * Sprite structure - represents any renderable game object
+ * Combines position, velocity, dimensions, and texture into one unit.
+ * Using floats for position/velocity enables smooth sub-pixel movement.
  */
 typedef struct {
     float x;
@@ -81,7 +82,8 @@ typedef struct {
     float vel_y;
     int width;
     int height;
-} player_t;
+    SDL_Texture *texture;
+} sprite_t;
 
 /*
  * Game state structure - holds all SDL resources and game data
@@ -89,10 +91,28 @@ typedef struct {
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
-    SDL_Texture *player_texture;
-    player_t player;
+    sprite_t player;
     bool running;
 } game_state_t;
+
+/*
+ * Render a sprite to the screen
+ * Call this for each sprite during the render phase.
+ */
+static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite) {
+    if (!sprite->texture) {
+        return;
+    }
+
+    SDL_Rect dest_rect = {
+        (int)sprite->x,
+        (int)sprite->y,
+        sprite->width,
+        sprite->height
+    };
+
+    SDL_RenderCopy(renderer, sprite->texture, NULL, &dest_rect);
+}
 
 /*
  * Create a colored rectangle texture programmatically
@@ -214,14 +234,12 @@ static bool game_init(game_state_t *game) {
         return false;
     }
 
-    /* Load the player texture */
-    game->player_texture = load_player_texture(game->renderer);
-    if (!game->player_texture) {
+    /* Initialize player sprite */
+    game->player.texture = load_player_texture(game->renderer);
+    if (!game->player.texture) {
         fprintf(stderr, "Failed to load player texture\n");
         return false;
     }
-
-    /* Initialize player position */
     game->player.x = PLAYER_START_X;
     game->player.y = PLAYER_START_Y;
     game->player.vel_x = 0.0f;
@@ -240,8 +258,8 @@ static bool game_init(game_state_t *game) {
  * Always destroy in reverse order of creation
  */
 static void game_cleanup(game_state_t *game) {
-    if (game->player_texture) {
-        SDL_DestroyTexture(game->player_texture);
+    if (game->player.texture) {
+        SDL_DestroyTexture(game->player.texture);
     }
     if (game->renderer) {
         SDL_DestroyRenderer(game->renderer);
@@ -352,20 +370,8 @@ static void game_render(game_state_t *game) {
                            COLOR_BG_R, COLOR_BG_G, COLOR_BG_B, 255);
     SDL_RenderClear(game->renderer);
 
-    /* Define where to draw the player sprite */
-    SDL_Rect dest_rect = {
-        (int)game->player.x,
-        (int)game->player.y,
-        game->player.width,
-        game->player.height
-    };
-
-    /*
-     * SDL_RenderCopy draws a texture to the renderer
-     * Parameters: renderer, texture, source rect (NULL = whole texture),
-     *             destination rect (position and size on screen)
-     */
-    SDL_RenderCopy(game->renderer, game->player_texture, NULL, &dest_rect);
+    /* Render all sprites */
+    sprite_render(game->renderer, &game->player);
 
     /* Present the frame - this displays everything we've drawn */
     SDL_RenderPresent(game->renderer);
