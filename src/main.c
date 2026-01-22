@@ -97,6 +97,8 @@ typedef struct {
     int width;
     int height;
     int z_index;          /* Render order: 0 = background, 50 = entities, 100 = UI */
+    double angle;         /* Rotation in degrees (clockwise) */
+    SDL_RendererFlip flip; /* SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL */
     SDL_Texture *texture;
 } sprite_t;
 
@@ -156,6 +158,40 @@ static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
     };
 
     SDL_RenderCopy(renderer, sprite->texture, src_rect, &dest_rect);
+}
+
+/*
+ * Render a sprite with extended options (rotation, flip, color modulation)
+ *
+ * src_rect:  Optional source rectangle for sprite sheets (NULL = full texture)
+ * angle:     Rotation in degrees (clockwise)
+ * center:    Point to rotate around (NULL = center of sprite)
+ * flip:      SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL, or combined
+ * r, g, b:   Color modulation (255 = no change, lower = tint toward that color)
+ */
+static void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
+                             const SDL_Rect *src_rect, double angle,
+                             const SDL_Point *center, SDL_RendererFlip flip,
+                             Uint8 r, Uint8 g, Uint8 b) {
+    if (!sprite->texture) {
+        return;
+    }
+
+    SDL_Rect dest_rect = {
+        (int)sprite->x,
+        (int)sprite->y,
+        sprite->width,
+        sprite->height
+    };
+
+    /* Apply color modulation */
+    SDL_SetTextureColorMod(sprite->texture, r, g, b);
+
+    SDL_RenderCopyEx(renderer, sprite->texture, src_rect, &dest_rect,
+                     angle, center, flip);
+
+    /* Reset color modulation to default */
+    SDL_SetTextureColorMod(sprite->texture, 255, 255, 255);
 }
 
 /* ============================================================================
@@ -393,6 +429,8 @@ static bool game_init(game_state_t *game) {
     player->width = SPRITE_WIDTH;
     player->height = SPRITE_HEIGHT;
     player->z_index = 50;  /* Entity layer */
+    player->angle = 0.0;
+    player->flip = SDL_FLIP_NONE;
 
     /* Add test sprite (index 1) */
     sprite_t *test = &game->sprites[game->sprite_count++];
@@ -405,6 +443,8 @@ static bool game_init(game_state_t *game) {
     test->width = SPRITE_WIDTH;
     test->height = SPRITE_HEIGHT;
     test->z_index = 40;  /* Below player layer */
+    test->angle = 45.0;  /* Rotated 45 degrees to demonstrate */
+    test->flip = SDL_FLIP_NONE;
 
     /* Load background texture */
     game->background = texture_load(&game->textures, "assets/background.png");
@@ -569,8 +609,15 @@ static void game_render(game_state_t *game) {
     /* Render all sprites sorted by z_index (lower z renders first = behind) */
     for (int z = 0; z <= 100; z++) {
         for (int i = 0; i < game->sprite_count; i++) {
-            if (game->sprites[i].z_index == z) {
-                sprite_render(game->renderer, &game->sprites[i], NULL);
+            sprite_t *spr = &game->sprites[i];
+            if (spr->z_index == z) {
+                if (spr->angle != 0.0 || spr->flip != SDL_FLIP_NONE) {
+                    sprite_render_ex(game->renderer, spr, NULL,
+                                     spr->angle, NULL, spr->flip,
+                                     255, 255, 255);
+                } else {
+                    sprite_render(game->renderer, spr, NULL);
+                }
             }
         }
     }
