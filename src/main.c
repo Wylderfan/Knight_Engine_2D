@@ -404,7 +404,7 @@ static bool game_init(game_state_t *game) {
     test->vel_y = 0.0f;
     test->width = SPRITE_WIDTH;
     test->height = SPRITE_HEIGHT;
-    test->z_index = 50;  /* Same layer as player */
+    test->z_index = 40;  /* Below player layer */
 
     /* Load background texture */
     game->background = texture_load(&game->textures, "assets/background.png");
@@ -566,9 +566,13 @@ static void game_render(game_state_t *game) {
         SDL_RenderCopy(game->renderer, game->background, NULL, NULL);
     }
 
-    /* Render all sprites (array order determines visual layering) */
-    for (int i = 0; i < game->sprite_count; i++) {
-        sprite_render(game->renderer, &game->sprites[i], NULL);
+    /* Render all sprites sorted by z_index (lower z renders first = behind) */
+    for (int z = 0; z <= 100; z++) {
+        for (int i = 0; i < game->sprite_count; i++) {
+            if (game->sprites[i].z_index == z) {
+                sprite_render(game->renderer, &game->sprites[i], NULL);
+            }
+        }
     }
 
     /* Present the frame - this displays everything we've drawn */
