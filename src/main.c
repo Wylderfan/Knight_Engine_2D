@@ -81,6 +81,9 @@
 #define TEXTURE_MAX_ENTRIES  32
 #define TEXTURE_PATH_MAX_LEN 128
 
+/* Sprite list settings */
+#define SPRITE_MAX_COUNT 64
+
 /*
  * Sprite structure - represents any renderable game object
  * Combines position, velocity, dimensions, and texture into one unit.
@@ -124,8 +127,9 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     texture_manager_t textures;
-    sprite_t player;
-    sprite_t test_sprite;  /* Second sprite for testing multi-sprite rendering */
+    sprite_t sprites[SPRITE_MAX_COUNT];
+    int sprite_count;
+    int player_index;  /* Index of player sprite in the array */
     SDL_Texture *background;
     bool running;
 } game_state_t;
@@ -364,37 +368,43 @@ static bool game_init(game_state_t *game) {
     /* Initialize texture manager */
     texture_manager_init(&game->textures, game->renderer);
 
-    /* Load player texture (try file first, fall back to programmatic) */
-    game->player.texture = texture_load(&game->textures, PLAYER_TEXTURE_PATH);
-    if (!game->player.texture) {
+    /* Initialize sprite list */
+    game->sprite_count = 0;
+
+    /* Add player sprite (index 0) */
+    sprite_t *player = &game->sprites[game->sprite_count++];
+    game->player_index = 0;
+    player->texture = texture_load(&game->textures, PLAYER_TEXTURE_PATH);
+    if (!player->texture) {
         /* Fallback: create programmatic sprite */
         printf("Creating fallback player sprite\n");
-        game->player.texture = create_colored_texture(game->renderer,
+        player->texture = create_colored_texture(game->renderer,
             SPRITE_WIDTH, SPRITE_HEIGHT,
             COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
-        if (!game->player.texture) {
+        if (!player->texture) {
             fprintf(stderr, "Failed to create player texture\n");
             return false;
         }
     }
-    game->player.x = PLAYER_START_X;
-    game->player.y = PLAYER_START_Y;
-    game->player.vel_x = 0.0f;
-    game->player.vel_y = 0.0f;
-    game->player.width = SPRITE_WIDTH;
-    game->player.height = SPRITE_HEIGHT;
-    game->player.z_index = 50;  /* Entity layer */
+    player->x = PLAYER_START_X;
+    player->y = PLAYER_START_Y;
+    player->vel_x = 0.0f;
+    player->vel_y = 0.0f;
+    player->width = SPRITE_WIDTH;
+    player->height = SPRITE_HEIGHT;
+    player->z_index = 50;  /* Entity layer */
 
-    /* Initialize test sprite at a different position */
-    game->test_sprite.texture = create_colored_texture(game->renderer,
+    /* Add test sprite (index 1) */
+    sprite_t *test = &game->sprites[game->sprite_count++];
+    test->texture = create_colored_texture(game->renderer,
         SPRITE_WIDTH, SPRITE_HEIGHT, 255, 100, 100);  /* Red-ish color */
-    game->test_sprite.x = 100.0f;
-    game->test_sprite.y = 100.0f;
-    game->test_sprite.vel_x = 0.0f;
-    game->test_sprite.vel_y = 0.0f;
-    game->test_sprite.width = SPRITE_WIDTH;
-    game->test_sprite.height = SPRITE_HEIGHT;
-    game->test_sprite.z_index = 50;  /* Same layer as player */
+    test->x = 100.0f;
+    test->y = 100.0f;
+    test->vel_x = 0.0f;
+    test->vel_y = 0.0f;
+    test->width = SPRITE_WIDTH;
+    test->height = SPRITE_HEIGHT;
+    test->z_index = 50;  /* Same layer as player */
 
     /* Load background texture */
     game->background = texture_load(&game->textures, "assets/background.png");
@@ -418,15 +428,18 @@ static bool game_init(game_state_t *game) {
  */
 static void game_cleanup(game_state_t *game) {
     /*
-     * Clean up textures not in manager (fallback textures)
-     * Check if texture exists in manager before destroying
+     * Clean up sprite textures not in manager (fallback/programmatic textures)
+     * Textures loaded via texture_manager are cleaned up by texture_manager_cleanup
      */
-    if (game->player.texture &&
-        !texture_get(&game->textures, PLAYER_TEXTURE_PATH)) {
-        SDL_DestroyTexture(game->player.texture);
-    }
-    if (game->test_sprite.texture) {
-        SDL_DestroyTexture(game->test_sprite.texture);
+    for (int i = 0; i < game->sprite_count; i++) {
+        SDL_Texture *tex = game->sprites[i].texture;
+        if (tex && i != game->player_index) {
+            /* Non-player sprites use programmatic textures, destroy them */
+            SDL_DestroyTexture(tex);
+        } else if (tex && !texture_get(&game->textures, PLAYER_TEXTURE_PATH)) {
+            /* Player fallback texture (not in manager) */
+            SDL_DestroyTexture(tex);
+        }
     }
     if (game->background &&
         !texture_get(&game->textures, "assets/background.png")) {
@@ -484,23 +497,24 @@ static void game_handle_events(game_state_t *game) {
  */
 static void game_process_input(game_state_t *game) {
     const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    sprite_t *player = &game->sprites[game->player_index];
 
     /* Reset velocity each frame */
-    game->player.vel_x = 0.0f;
-    game->player.vel_y = 0.0f;
+    player->vel_x = 0.0f;
+    player->vel_y = 0.0f;
 
     /* Check movement keys and set velocity */
     if (keys[KEY_MOVE_UP] || keys[KEY_MOVE_UP_ALT]) {
-        game->player.vel_y = -SPRITE_SPEED;
+        player->vel_y = -SPRITE_SPEED;
     }
     if (keys[KEY_MOVE_DOWN] || keys[KEY_MOVE_DOWN_ALT]) {
-        game->player.vel_y = SPRITE_SPEED;
+        player->vel_y = SPRITE_SPEED;
     }
     if (keys[KEY_MOVE_LEFT] || keys[KEY_MOVE_LEFT_ALT]) {
-        game->player.vel_x = -SPRITE_SPEED;
+        player->vel_x = -SPRITE_SPEED;
     }
     if (keys[KEY_MOVE_RIGHT] || keys[KEY_MOVE_RIGHT_ALT]) {
-        game->player.vel_x = SPRITE_SPEED;
+        player->vel_x = SPRITE_SPEED;
     }
 }
 
@@ -512,22 +526,24 @@ static void game_process_input(game_state_t *game) {
  * speed regardless of frame rate (velocity * time = distance).
  */
 static void game_update(game_state_t *game, float delta_time) {
+    sprite_t *player = &game->sprites[game->player_index];
+
     /* Update player position based on velocity and delta time */
-    game->player.x += game->player.vel_x * delta_time;
-    game->player.y += game->player.vel_y * delta_time;
+    player->x += player->vel_x * delta_time;
+    player->y += player->vel_y * delta_time;
 
     /* Clamp player position to screen boundaries */
-    if (game->player.x < 0) {
-        game->player.x = 0;
+    if (player->x < 0) {
+        player->x = 0;
     }
-    if (game->player.x > WINDOW_WIDTH - game->player.width) {
-        game->player.x = WINDOW_WIDTH - game->player.width;
+    if (player->x > WINDOW_WIDTH - player->width) {
+        player->x = WINDOW_WIDTH - player->width;
     }
-    if (game->player.y < 0) {
-        game->player.y = 0;
+    if (player->y < 0) {
+        player->y = 0;
     }
-    if (game->player.y > WINDOW_HEIGHT - game->player.height) {
-        game->player.y = WINDOW_HEIGHT - game->player.height;
+    if (player->y > WINDOW_HEIGHT - player->height) {
+        player->y = WINDOW_HEIGHT - player->height;
     }
 }
 
@@ -550,9 +566,10 @@ static void game_render(game_state_t *game) {
         SDL_RenderCopy(game->renderer, game->background, NULL, NULL);
     }
 
-    /* Render all sprites (order determines visual layering) */
-    sprite_render(game->renderer, &game->test_sprite, NULL);
-    sprite_render(game->renderer, &game->player, NULL);
+    /* Render all sprites (array order determines visual layering) */
+    for (int i = 0; i < game->sprite_count; i++) {
+        sprite_render(game->renderer, &game->sprites[i], NULL);
+    }
 
     /* Present the frame - this displays everything we've drawn */
     SDL_RenderPresent(game->renderer);
