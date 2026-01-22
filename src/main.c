@@ -32,12 +32,16 @@
 #define PLAYER_START_X ((WINDOW_WIDTH - SPRITE_WIDTH) / 2.0f)
 #define PLAYER_START_Y ((WINDOW_HEIGHT - SPRITE_HEIGHT) / 2.0f)
 
-/* Frame rate control (VSYNC handles actual timing) */
-#define MAX_DELTA_TIME 0.1f  /* Cap delta time to prevent large jumps */
+/* Frame rate control */
+#define TARGET_FPS        60
+#define FIXED_TIMESTEP    (1.0f / TARGET_FPS)  /* Fixed update rate for physics */
+#define MAX_DELTA_TIME    0.1f   /* Cap delta time to prevent large jumps */
+#define MAX_ACCUMULATOR   0.25f  /* Prevent spiral of death on slow frames */
 
 /* FPS counter settings */
 #define FPS_UPDATE_INTERVAL 500  /* Update FPS display every N milliseconds */
 #define FPS_DISPLAY_ENABLED 1    /* Set to 0 to disable FPS in window title */
+#define FPS_DEBUG_LOG       0    /* Set to 1 to log FPS vs target to console */
 
 /* Asset paths */
 #define PLAYER_TEXTURE_PATH "assets/player.png"
@@ -408,6 +412,18 @@ int main(int argc, char *argv[]) {
     int frame_count = 0;
     float current_fps = 0.0f;
 
+    /*
+     * Fixed timestep accumulator pattern
+     *
+     * Accumulates frame time and runs physics updates at a fixed rate.
+     * This ensures consistent physics behavior regardless of frame rate.
+     * Benefits:
+     * - Deterministic physics (same results every time)
+     * - Stable collision detection
+     * - No physics glitches on slow frames
+     */
+    float accumulator = 0.0f;
+
     /* Main game loop */
     while (game.running) {
         /* Calculate delta time (time since last frame in seconds) */
@@ -422,34 +438,57 @@ int main(int argc, char *argv[]) {
 
         /* FPS calculation and display */
         frame_count++;
-#if FPS_DISPLAY_ENABLED
+#if FPS_DISPLAY_ENABLED || FPS_DEBUG_LOG
         if (current_time - fps_last_time >= FPS_UPDATE_INTERVAL) {
             current_fps = frame_count * 1000.0f / (current_time - fps_last_time);
             frame_count = 0;
             fps_last_time = current_time;
 
+#if FPS_DISPLAY_ENABLED
             /* Display FPS in window title */
             char title_buffer[128];
             snprintf(title_buffer, sizeof(title_buffer), "%s - %.1f FPS",
                      WINDOW_TITLE, current_fps);
             SDL_SetWindowTitle(game.window, title_buffer);
+#endif
+
+#if FPS_DEBUG_LOG
+            /* Log actual vs target FPS to console */
+            float fps_diff = current_fps - TARGET_FPS;
+            printf("[FPS] Actual: %.1f | Target: %d | Diff: %+.1f\n",
+                   current_fps, TARGET_FPS, fps_diff);
+#endif
         }
 #endif
 
-        /* Game loop phases */
+        /* Handle events and input (once per frame) */
         game_handle_events(&game);
         game_process_input(&game);
-        game_update(&game, delta_time);
+
+        /*
+         * Fixed timestep update loop
+         * Accumulate time and run updates at fixed intervals.
+         * This decouples physics from rendering frame rate.
+         */
+        accumulator += delta_time;
+        if (accumulator > MAX_ACCUMULATOR) {
+            accumulator = MAX_ACCUMULATOR;  /* Prevent spiral of death */
+        }
+        while (accumulator >= FIXED_TIMESTEP) {
+            game_update(&game, FIXED_TIMESTEP);
+            accumulator -= FIXED_TIMESTEP;
+        }
+
+        /* Render (once per frame, after all updates) */
         game_render(&game);
 
         /*
          * Frame rate is controlled by VSYNC (SDL_RENDERER_PRESENTVSYNC).
-         * SDL_RenderPresent blocks until the next monitor refresh,
-         * ensuring smooth 60 FPS without manual timing.
+         * SDL_RenderPresent blocks until the next monitor refresh.
          */
     }
 
-    (void)current_fps; /* Suppress unused warning when FPS_DISPLAY_ENABLED=0 */
+    (void)current_fps; /* Suppress unused warning when FPS disabled */
 
     game_cleanup(&game);
     return 0;
