@@ -13,6 +13,7 @@
 #include <SDL2/SDL_image.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 /* ============================================================================
  * CONFIGURATION - Adjust these values to customize game behavior
@@ -76,6 +77,10 @@
 /* Menu/system keys (uses SDLK_* for key symbols) */
 #define KEY_QUIT SDLK_ESCAPE
 
+/* Texture manager settings */
+#define TEXTURE_MAX_ENTRIES  32
+#define TEXTURE_PATH_MAX_LEN 128
+
 /*
  * Sprite structure - represents any renderable game object
  * Combines position, velocity, dimensions, and texture into one unit.
@@ -92,12 +97,34 @@ typedef struct {
 } sprite_t;
 
 /*
+ * Texture entry - stores a loaded texture with its path identifier
+ */
+typedef struct {
+    char path[TEXTURE_PATH_MAX_LEN];
+    SDL_Texture *texture;
+    int width;
+    int height;
+} texture_entry_t;
+
+/*
+ * Texture manager - simple storage for loaded textures
+ * Prevents loading the same texture multiple times and handles cleanup.
+ */
+typedef struct {
+    texture_entry_t entries[TEXTURE_MAX_ENTRIES];
+    int count;
+    SDL_Renderer *renderer;
+} texture_manager_t;
+
+/*
  * Game state structure - holds all SDL resources and game data
  */
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
+    texture_manager_t textures;
     sprite_t player;
+    SDL_Texture *background;
     bool running;
 } game_state_t;
 
@@ -119,6 +146,118 @@ static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite) {
 
     SDL_RenderCopy(renderer, sprite->texture, NULL, &dest_rect);
 }
+
+/* ============================================================================
+ * TEXTURE MANAGER - Load, cache, and manage textures
+ * ============================================================================ */
+
+/*
+ * Initialize the texture manager
+ */
+static void texture_manager_init(texture_manager_t *tm, SDL_Renderer *renderer) {
+    tm->count = 0;
+    tm->renderer = renderer;
+    for (int i = 0; i < TEXTURE_MAX_ENTRIES; i++) {
+        tm->entries[i].path[0] = '\0';
+        tm->entries[i].texture = NULL;
+        tm->entries[i].width = 0;
+        tm->entries[i].height = 0;
+    }
+}
+
+/*
+ * Load a texture from file path
+ * Returns the loaded texture, or NULL on failure.
+ * Caches textures - subsequent loads of the same path return cached version.
+ */
+static SDL_Texture *texture_load(texture_manager_t *tm, const char *path) {
+    /* Check if already loaded */
+    for (int i = 0; i < tm->count; i++) {
+        if (strcmp(tm->entries[i].path, path) == 0) {
+            return tm->entries[i].texture;
+        }
+    }
+
+    /* Check capacity */
+    if (tm->count >= TEXTURE_MAX_ENTRIES) {
+        fprintf(stderr, "Texture manager full, cannot load: %s\n", path);
+        return NULL;
+    }
+
+    /* Load the texture */
+    SDL_Texture *texture = IMG_LoadTexture(tm->renderer, path);
+    if (!texture) {
+        fprintf(stderr, "Failed to load texture '%s': %s\n", path, IMG_GetError());
+        return NULL;
+    }
+
+    /* Enable alpha blending */
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+
+    /* Query texture dimensions */
+    int width, height;
+    SDL_QueryTexture(texture, NULL, NULL, &width, &height);
+
+    /* Store in cache */
+    texture_entry_t *entry = &tm->entries[tm->count];
+    strncpy(entry->path, path, TEXTURE_PATH_MAX_LEN - 1);
+    entry->path[TEXTURE_PATH_MAX_LEN - 1] = '\0';
+    entry->texture = texture;
+    entry->width = width;
+    entry->height = height;
+    tm->count++;
+
+    printf("Loaded texture: %s (%dx%d)\n", path, width, height);
+    return texture;
+}
+
+/*
+ * Get a previously loaded texture by path
+ * Returns NULL if not found (use texture_load to load first)
+ */
+static SDL_Texture *texture_get(texture_manager_t *tm, const char *path) {
+    for (int i = 0; i < tm->count; i++) {
+        if (strcmp(tm->entries[i].path, path) == 0) {
+            return tm->entries[i].texture;
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Get texture dimensions by path
+ * Returns true if found, false otherwise
+ */
+static bool texture_get_size(texture_manager_t *tm, const char *path,
+                             int *width, int *height) {
+    for (int i = 0; i < tm->count; i++) {
+        if (strcmp(tm->entries[i].path, path) == 0) {
+            *width = tm->entries[i].width;
+            *height = tm->entries[i].height;
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Clean up all loaded textures
+ */
+static void texture_manager_cleanup(texture_manager_t *tm) {
+    for (int i = 0; i < tm->count; i++) {
+        if (tm->entries[i].texture) {
+            SDL_DestroyTexture(tm->entries[i].texture);
+            tm->entries[i].texture = NULL;
+        }
+        tm->entries[i].path[0] = '\0';
+    }
+    tm->count = 0;
+    printf("Texture manager cleaned up\n");
+}
+
+/* ============================================================================
+ * TEXTURE CREATION HELPERS
+ * ============================================================================ */
 
 /*
  * Create a colored rectangle texture programmatically
@@ -158,31 +297,6 @@ static SDL_Texture *create_colored_texture(SDL_Renderer *renderer,
     if (!texture) {
         fprintf(stderr, "Failed to create texture: %s\n", SDL_GetError());
     }
-
-    return texture;
-}
-
-/*
- * Load player texture - tries to load from file first, falls back to
- * programmatically generated colored rectangle
- */
-static SDL_Texture *load_player_texture(SDL_Renderer *renderer) {
-    SDL_Texture *texture = NULL;
-
-    /* Try to load texture from configured path */
-    texture = IMG_LoadTexture(renderer, PLAYER_TEXTURE_PATH);
-
-    if (texture) {
-        /* Enable alpha blending for transparency */
-        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-        printf("Loaded player texture from %s\n", PLAYER_TEXTURE_PATH);
-        return texture;
-    }
-
-    /* Fallback: create a colored rectangle */
-    printf("%s not found, creating programmatic sprite\n", PLAYER_TEXTURE_PATH);
-    texture = create_colored_texture(renderer, SPRITE_WIDTH, SPRITE_HEIGHT,
-                                     COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
 
     return texture;
 }
@@ -240,11 +354,21 @@ static bool game_init(game_state_t *game) {
         return false;
     }
 
-    /* Initialize player sprite */
-    game->player.texture = load_player_texture(game->renderer);
+    /* Initialize texture manager */
+    texture_manager_init(&game->textures, game->renderer);
+
+    /* Load player texture (try file first, fall back to programmatic) */
+    game->player.texture = texture_load(&game->textures, PLAYER_TEXTURE_PATH);
     if (!game->player.texture) {
-        fprintf(stderr, "Failed to load player texture\n");
-        return false;
+        /* Fallback: create programmatic sprite */
+        printf("Creating fallback player sprite\n");
+        game->player.texture = create_colored_texture(game->renderer,
+            SPRITE_WIDTH, SPRITE_HEIGHT,
+            COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
+        if (!game->player.texture) {
+            fprintf(stderr, "Failed to create player texture\n");
+            return false;
+        }
     }
     game->player.x = PLAYER_START_X;
     game->player.y = PLAYER_START_Y;
@@ -252,6 +376,16 @@ static bool game_init(game_state_t *game) {
     game->player.vel_y = 0.0f;
     game->player.width = SPRITE_WIDTH;
     game->player.height = SPRITE_HEIGHT;
+
+    /* Load background texture */
+    game->background = texture_load(&game->textures, "assets/background.png");
+    if (!game->background) {
+        /* Fallback: create simple tiled background texture */
+        printf("Creating fallback background\n");
+        game->background = create_colored_texture(game->renderer,
+            WINDOW_WIDTH, WINDOW_HEIGHT,
+            COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
+    }
 
     game->running = true;
 
@@ -264,9 +398,22 @@ static bool game_init(game_state_t *game) {
  * Always destroy in reverse order of creation
  */
 static void game_cleanup(game_state_t *game) {
-    if (game->player.texture) {
+    /*
+     * Clean up textures not in manager (fallback textures)
+     * Check if texture exists in manager before destroying
+     */
+    if (game->player.texture &&
+        !texture_get(&game->textures, PLAYER_TEXTURE_PATH)) {
         SDL_DestroyTexture(game->player.texture);
     }
+    if (game->background &&
+        !texture_get(&game->textures, "assets/background.png")) {
+        SDL_DestroyTexture(game->background);
+    }
+
+    /* Clean up texture manager (handles all file-loaded textures) */
+    texture_manager_cleanup(&game->textures);
+
     if (game->renderer) {
         SDL_DestroyRenderer(game->renderer);
     }
@@ -371,10 +518,15 @@ static void game_update(game_state_t *game, float delta_time) {
  * 3. Present the frame (swap buffers to display)
  */
 static void game_render(game_state_t *game) {
-    /* Set background color and clear screen */
+    /* Clear screen with background color */
     SDL_SetRenderDrawColor(game->renderer,
                            COLOR_BG_R, COLOR_BG_G, COLOR_BG_B, 255);
     SDL_RenderClear(game->renderer);
+
+    /* Render background texture (covers full window) */
+    if (game->background) {
+        SDL_RenderCopy(game->renderer, game->background, NULL, NULL);
+    }
 
     /* Render all sprites */
     sprite_render(game->renderer, &game->player);
