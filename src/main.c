@@ -93,6 +93,7 @@ typedef struct {
     float vel_y;
     int width;
     int height;
+    int z_index;          /* Render order: 0 = background, 50 = entities, 100 = UI */
     SDL_Texture *texture;
 } sprite_t;
 
@@ -124,6 +125,7 @@ typedef struct {
     SDL_Renderer *renderer;
     texture_manager_t textures;
     sprite_t player;
+    sprite_t test_sprite;  /* Second sprite for testing multi-sprite rendering */
     SDL_Texture *background;
     bool running;
 } game_state_t;
@@ -131,8 +133,13 @@ typedef struct {
 /*
  * Render a sprite to the screen
  * Call this for each sprite during the render phase.
+ *
+ * src_rect: Optional source rectangle for sprite sheets.
+ *           Pass NULL to render the entire texture.
+ *           When non-NULL, specifies which portion of the texture to render.
  */
-static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite) {
+static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
+                          const SDL_Rect *src_rect) {
     if (!sprite->texture) {
         return;
     }
@@ -144,7 +151,7 @@ static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite) {
         sprite->height
     };
 
-    SDL_RenderCopy(renderer, sprite->texture, NULL, &dest_rect);
+    SDL_RenderCopy(renderer, sprite->texture, src_rect, &dest_rect);
 }
 
 /* ============================================================================
@@ -376,6 +383,18 @@ static bool game_init(game_state_t *game) {
     game->player.vel_y = 0.0f;
     game->player.width = SPRITE_WIDTH;
     game->player.height = SPRITE_HEIGHT;
+    game->player.z_index = 50;  /* Entity layer */
+
+    /* Initialize test sprite at a different position */
+    game->test_sprite.texture = create_colored_texture(game->renderer,
+        SPRITE_WIDTH, SPRITE_HEIGHT, 255, 100, 100);  /* Red-ish color */
+    game->test_sprite.x = 100.0f;
+    game->test_sprite.y = 100.0f;
+    game->test_sprite.vel_x = 0.0f;
+    game->test_sprite.vel_y = 0.0f;
+    game->test_sprite.width = SPRITE_WIDTH;
+    game->test_sprite.height = SPRITE_HEIGHT;
+    game->test_sprite.z_index = 50;  /* Same layer as player */
 
     /* Load background texture */
     game->background = texture_load(&game->textures, "assets/background.png");
@@ -405,6 +424,9 @@ static void game_cleanup(game_state_t *game) {
     if (game->player.texture &&
         !texture_get(&game->textures, PLAYER_TEXTURE_PATH)) {
         SDL_DestroyTexture(game->player.texture);
+    }
+    if (game->test_sprite.texture) {
+        SDL_DestroyTexture(game->test_sprite.texture);
     }
     if (game->background &&
         !texture_get(&game->textures, "assets/background.png")) {
@@ -528,8 +550,9 @@ static void game_render(game_state_t *game) {
         SDL_RenderCopy(game->renderer, game->background, NULL, NULL);
     }
 
-    /* Render all sprites */
-    sprite_render(game->renderer, &game->player);
+    /* Render all sprites (order determines visual layering) */
+    sprite_render(game->renderer, &game->test_sprite, NULL);
+    sprite_render(game->renderer, &game->player, NULL);
 
     /* Present the frame - this displays everything we've drawn */
     SDL_RenderPresent(game->renderer);
