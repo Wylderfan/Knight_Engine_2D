@@ -13,6 +13,7 @@
 #include <SDL2/SDL_image.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>  /* STRESS_TEST - for rand() */
 #include <string.h>
 #include <math.h>
 
@@ -93,6 +94,10 @@
 
 /* Debug output interval (milliseconds) */
 #define DEBUG_OUTPUT_INTERVAL 500
+
+/* STRESS_TEST - Toggle key and sprite count (easy to remove: search "STRESS_TEST") */
+#define KEY_STRESS_TEST SDL_SCANCODE_T
+#define STRESS_TEST_SPRITE_COUNT 150
 
 /* Input system settings */
 #define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
@@ -186,7 +191,7 @@ static void world_to_screen(const camera_t *camera, float world_x, float world_y
 #define TEXTURE_PATH_MAX_LEN 128
 
 /* Sprite list settings */
-#define SPRITE_MAX_COUNT 64
+#define SPRITE_MAX_COUNT 256  /* Increased for stress testing */
 
 /*
  * Sprite structure - represents any renderable game object
@@ -248,6 +253,9 @@ typedef struct {
     Uint32 debug_last_output;  /* Last time debug info was printed */
     float debug_fps;           /* Current FPS for debug display */
     float debug_delta_time;    /* Current delta time for debug display */
+    /* STRESS_TEST */
+    bool stress_test_active;
+    int stress_test_base_index;  /* First index of stress test sprites */
 } game_state_t;
 
 /*
@@ -553,6 +561,45 @@ static SDL_Texture *create_colored_texture(SDL_Renderer *renderer,
     return texture;
 }
 
+/* STRESS_TEST - Spawns/despawns test sprites for performance testing */
+static void stress_test_toggle(game_state_t *game) {
+    if (game->stress_test_active) {
+        /* Despawn: destroy textures and reset count */
+        for (int i = game->stress_test_base_index; i < game->sprite_count; i++) {
+            if (game->sprites[i].texture) {
+                SDL_DestroyTexture(game->sprites[i].texture);
+            }
+        }
+        game->sprite_count = game->stress_test_base_index;
+        game->stress_test_active = false;
+        printf("[STRESS_TEST] Disabled - %d sprites now active\n", game->sprite_count);
+    } else {
+        /* Spawn stress test sprites */
+        game->stress_test_base_index = game->sprite_count;
+        int spawned = 0;
+        for (int i = 0; i < STRESS_TEST_SPRITE_COUNT && game->sprite_count < SPRITE_MAX_COUNT; i++) {
+            sprite_t *spr = &game->sprites[game->sprite_count++];
+            spr->texture = create_colored_texture(game->renderer, 32, 32,
+                (Uint8)(rand() % 256), (Uint8)(rand() % 256), (Uint8)(rand() % 256));
+            /* Scatter across a larger world area */
+            spr->x = (float)(rand() % (WINDOW_WIDTH * 2)) - WINDOW_WIDTH / 2;
+            spr->y = (float)(rand() % (WINDOW_HEIGHT * 2)) - WINDOW_HEIGHT / 2;
+            spr->vel_x = (float)(rand() % 100 - 50);  /* Random velocity */
+            spr->vel_y = (float)(rand() % 100 - 50);
+            spr->width = 32;
+            spr->height = 32;
+            spr->z_index = 30 + (rand() % 20);  /* z 30-49, below player */
+            spr->angle = (double)(rand() % 360);
+            spr->flip = SDL_FLIP_NONE;
+            spr->show_debug_bounds = false;  /* Too cluttered with 100+ */
+            spawned++;
+        }
+        game->stress_test_active = true;
+        printf("[STRESS_TEST] Enabled - spawned %d sprites (%d total)\n",
+               spawned, game->sprite_count);
+    }
+}
+
 /*
  * Initialize SDL subsystems, create window and renderer
  *
@@ -621,6 +668,10 @@ static bool game_init(game_state_t *game) {
     game->debug_last_output = 0;
     game->debug_fps = 0.0f;
     game->debug_delta_time = 0.0f;
+
+    /* STRESS_TEST - Initialize state */
+    game->stress_test_active = false;
+    game->stress_test_base_index = 0;
 
     /* Initialize sprite list */
     game->sprite_count = 0;
@@ -805,6 +856,11 @@ static void game_update(game_state_t *game, float delta_time) {
         printf("[DEBUG] Debug mode %s\n", game->debug_enabled ? "ENABLED" : "DISABLED");
     }
 
+    /* STRESS_TEST - Toggle with T key */
+    if (input_key_pressed(input, KEY_STRESS_TEST)) {
+        stress_test_toggle(game);
+    }
+
     /* Update camera position (IJKL keys) */
     if (input_key_down(input, KEY_CAM_UP)) {
         game->camera.y -= CAMERA_SPEED * delta_time;
@@ -822,6 +878,19 @@ static void game_update(game_state_t *game, float delta_time) {
     /* Update player position based on velocity and delta time */
     player->x += player->vel_x * delta_time;
     player->y += player->vel_y * delta_time;
+
+    /* STRESS_TEST - Update stress test sprites */
+    if (game->stress_test_active) {
+        for (int i = game->stress_test_base_index; i < game->sprite_count; i++) {
+            sprite_t *spr = &game->sprites[i];
+            spr->x += spr->vel_x * delta_time;
+            spr->y += spr->vel_y * delta_time;
+            spr->angle += 90.0 * delta_time;  /* Rotate */
+            /* Bounce off world bounds */
+            if (spr->x < -WINDOW_WIDTH || spr->x > WINDOW_WIDTH * 2) spr->vel_x = -spr->vel_x;
+            if (spr->y < -WINDOW_HEIGHT || spr->y > WINDOW_HEIGHT * 2) spr->vel_y = -spr->vel_y;
+        }
+    }
 
     /* Clamp player position to camera's visible area (world coordinates) */
     float cam_left = game->camera.x;
@@ -910,7 +979,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("Controls: Arrow keys or WASD to move, ESC to quit\n");
+    printf("Controls: Arrow keys or WASD to move, P=debug, T=stress test, ESC to quit\n");
 
     Uint32 last_time = SDL_GetTicks();
 
@@ -977,10 +1046,11 @@ int main(int argc, char *argv[]) {
             current_time - game.debug_last_output >= DEBUG_OUTPUT_INTERVAL) {
             game.debug_last_output = current_time;
             printf("[DEBUG] FPS: %.1f | Delta: %.4fs (%.2fms) | "
-                   "Player: (%.1f, %.1f) | Camera: (%.1f, %.1f)\n",
+                   "Sprites: %d | Player: (%.1f, %.1f) | Camera: (%.1f, %.1f)\n",
                    game.debug_fps,
                    game.debug_delta_time,
                    game.debug_delta_time * 1000.0f,
+                   game.sprite_count,
                    game.sprites[game.player_index].x,
                    game.sprites[game.player_index].y,
                    game.camera.x,

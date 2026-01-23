@@ -150,6 +150,20 @@ else()
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# AddressSanitizer option for memory leak detection
+# Usage: cmake -DENABLE_ASAN=ON ..
+option(ENABLE_ASAN "Enable AddressSanitizer for memory leak detection" OFF)
+if(ENABLE_ASAN)
+    if(MSVC)
+        message(WARNING "AddressSanitizer on MSVC requires VS 2019+ and /fsanitize=address")
+        target_compile_options(${PROJECT_NAME} PRIVATE /fsanitize=address)
+    else()
+        target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address)
+    endif()
+    message(STATUS "AddressSanitizer: ENABLED")
+endif()
+
 # Print configuration summary
 message(STATUS "")
 message(STATUS "Knight Engine 2D Configuration:")
