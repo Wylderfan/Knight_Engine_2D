@@ -87,6 +87,12 @@
 /* Camera movement speed */
 #define CAMERA_SPEED 200.0f
 
+/* Debug key */
+#define KEY_DEBUG_TOGGLE SDL_SCANCODE_P
+
+/* Debug output interval (milliseconds) */
+#define DEBUG_OUTPUT_INTERVAL 500
+
 /* Input system settings */
 #define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
 
@@ -233,6 +239,11 @@ typedef struct {
     int player_index;  /* Index of player sprite in the array */
     SDL_Texture *background;
     bool running;
+    /* Debug state */
+    bool debug_enabled;
+    Uint32 debug_last_output;  /* Last time debug info was printed */
+    float debug_fps;           /* Current FPS for debug display */
+    float debug_delta_time;    /* Current delta time for debug display */
 } game_state_t;
 
 /*
@@ -299,6 +310,42 @@ static void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
 
     /* Reset color modulation to default */
     SDL_SetTextureColorMod(sprite->texture, 255, 255, 255);
+}
+
+/* ============================================================================
+ * DEBUG UTILITIES - Visual debugging tools
+ * ============================================================================ */
+
+/*
+ * Draw a colored rectangle outline (for collision boxes, debug bounds, etc.)
+ * Uses world coordinates - converts to screen space using camera.
+ */
+static void debug_draw_rect(SDL_Renderer *renderer, const camera_t *camera,
+                            float world_x, float world_y, int width, int height,
+                            Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+    int screen_x, screen_y;
+    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
+
+    SDL_Rect rect = { screen_x, screen_y, width, height };
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_RenderDrawRect(renderer, &rect);
+}
+
+/*
+ * Draw a filled colored rectangle (for debug visualization)
+ * Uses world coordinates - converts to screen space using camera.
+ */
+static void debug_fill_rect(SDL_Renderer *renderer, const camera_t *camera,
+                            float world_x, float world_y, int width, int height,
+                            Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+    int screen_x, screen_y;
+    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
+
+    SDL_Rect rect = { screen_x, screen_y, width, height };
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_RenderFillRect(renderer, &rect);
 }
 
 /* ============================================================================
@@ -518,6 +565,12 @@ static bool game_init(game_state_t *game) {
     game->camera.x = 0.0f;
     game->camera.y = 0.0f;
 
+    /* Initialize debug state */
+    game->debug_enabled = false;
+    game->debug_last_output = 0;
+    game->debug_fps = 0.0f;
+    game->debug_delta_time = 0.0f;
+
     /* Initialize sprite list */
     game->sprite_count = 0;
 
@@ -687,6 +740,12 @@ static void game_update(game_state_t *game, float delta_time) {
     sprite_t *player = &game->sprites[game->player_index];
     const input_state_t *input = &game->input;
 
+    /* Toggle debug mode with P key */
+    if (input_key_pressed(input, KEY_DEBUG_TOGGLE)) {
+        game->debug_enabled = !game->debug_enabled;
+        printf("[DEBUG] Debug mode %s\n", game->debug_enabled ? "ENABLED" : "DISABLED");
+    }
+
     /* Update camera position (IJKL keys) */
     if (input_key_down(input, KEY_CAM_UP)) {
         game->camera.y -= CAMERA_SPEED * delta_time;
@@ -841,6 +900,25 @@ int main(int argc, char *argv[]) {
 #endif
         }
 #endif
+
+        /* Store debug values */
+        game.debug_fps = current_fps;
+        game.debug_delta_time = delta_time;
+
+        /* Debug output (when enabled) */
+        if (game.debug_enabled &&
+            current_time - game.debug_last_output >= DEBUG_OUTPUT_INTERVAL) {
+            game.debug_last_output = current_time;
+            printf("[DEBUG] FPS: %.1f | Delta: %.4fs (%.2fms) | "
+                   "Player: (%.1f, %.1f) | Camera: (%.1f, %.1f)\n",
+                   game.debug_fps,
+                   game.debug_delta_time,
+                   game.debug_delta_time * 1000.0f,
+                   game.sprites[game.player_index].x,
+                   game.sprites[game.player_index].y,
+                   game.camera.x,
+                   game.camera.y);
+        }
 
         /* Update input state (must be called before processing input) */
         input_update(&game.input);
