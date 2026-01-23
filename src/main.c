@@ -11,37 +11,10 @@
 #include <math.h>
 
 #include "core/config.h"
+#include "graphics/camera.h"
+#include "graphics/texture.h"
 #include "input/input.h"
 #include "input/input_config.h"
-
-/* ============================================================================
- * CAMERA SYSTEM - World vs screen coordinate management
- * ============================================================================
- *
- * Coordinate Systems:
- * - World coordinates: Position in the game world (can extend beyond screen)
- * - Screen coordinates: Position on the visible display (0,0 = top-left)
- *
- * The camera defines which portion of the world is visible on screen.
- * Objects at world position (x, y) appear at screen position (x - camera.x, y - camera.y)
- */
-
-/*
- * Camera structure - defines the visible area of the world
- */
-typedef struct {
-    float x;  /* World x position of camera's top-left corner */
-    float y;  /* World y position of camera's top-left corner */
-} camera_t;
-
-/*
- * Convert world coordinates to screen coordinates
- */
-static void world_to_screen(const camera_t *camera, float world_x, float world_y,
-                            int *screen_x, int *screen_y) {
-    *screen_x = (int)(world_x - camera->x);
-    *screen_y = (int)(world_y - camera->y);
-}
 
 /*
  * Sprite structure - represents any renderable game object
@@ -63,26 +36,6 @@ typedef struct {
     bool show_debug_bounds;  /* Draw bounding box when debug mode is on */
     Uint8 debug_r, debug_g, debug_b;  /* Debug border color */
 } sprite_t;
-
-/*
- * Texture entry - stores a loaded texture with its path identifier
- */
-typedef struct {
-    char path[TEXTURE_PATH_MAX_LEN];
-    SDL_Texture *texture;
-    int width;
-    int height;
-} texture_entry_t;
-
-/*
- * Texture manager - simple storage for loaded textures
- * Prevents loading the same texture multiple times and handles cleanup.
- */
-typedef struct {
-    texture_entry_t entries[TEXTURE_MAX_ENTRIES];
-    int count;
-    SDL_Renderer *renderer;
-} texture_manager_t;
 
 /*
  * Game state structure - holds all SDL resources and game data
@@ -257,160 +210,6 @@ static void debug_draw_rect_rotated(SDL_Renderer *renderer, const camera_t *came
     SDL_RenderDrawLine(renderer, corners[3].x, corners[3].y, corners[0].x, corners[0].y);
 }
 
-/* ============================================================================
- * TEXTURE MANAGER - Load, cache, and manage textures
- * ============================================================================ */
-
-/*
- * Initialize the texture manager
- */
-static void texture_manager_init(texture_manager_t *tm, SDL_Renderer *renderer) {
-    tm->count = 0;
-    tm->renderer = renderer;
-    for (int i = 0; i < TEXTURE_MAX_ENTRIES; i++) {
-        tm->entries[i].path[0] = '\0';
-        tm->entries[i].texture = NULL;
-        tm->entries[i].width = 0;
-        tm->entries[i].height = 0;
-    }
-}
-
-/*
- * Load a texture from file path
- * Returns the loaded texture, or NULL on failure.
- * Caches textures - subsequent loads of the same path return cached version.
- */
-static SDL_Texture *texture_load(texture_manager_t *tm, const char *path) {
-    /* Check if already loaded */
-    for (int i = 0; i < tm->count; i++) {
-        if (strcmp(tm->entries[i].path, path) == 0) {
-            return tm->entries[i].texture;
-        }
-    }
-
-    /* Check capacity */
-    if (tm->count >= TEXTURE_MAX_ENTRIES) {
-        fprintf(stderr, "Texture manager full, cannot load: %s\n", path);
-        return NULL;
-    }
-
-    /* Load the texture */
-    SDL_Texture *texture = IMG_LoadTexture(tm->renderer, path);
-    if (!texture) {
-        fprintf(stderr, "Failed to load texture '%s': %s\n", path, IMG_GetError());
-        return NULL;
-    }
-
-    /* Enable alpha blending */
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-
-    /* Query texture dimensions */
-    int width, height;
-    SDL_QueryTexture(texture, NULL, NULL, &width, &height);
-
-    /* Store in cache */
-    texture_entry_t *entry = &tm->entries[tm->count];
-    strncpy(entry->path, path, TEXTURE_PATH_MAX_LEN - 1);
-    entry->path[TEXTURE_PATH_MAX_LEN - 1] = '\0';
-    entry->texture = texture;
-    entry->width = width;
-    entry->height = height;
-    tm->count++;
-
-    printf("Loaded texture: %s (%dx%d)\n", path, width, height);
-    return texture;
-}
-
-/*
- * Get a previously loaded texture by path
- * Returns NULL if not found (use texture_load to load first)
- */
-static SDL_Texture *texture_get(texture_manager_t *tm, const char *path) {
-    for (int i = 0; i < tm->count; i++) {
-        if (strcmp(tm->entries[i].path, path) == 0) {
-            return tm->entries[i].texture;
-        }
-    }
-    return NULL;
-}
-
-/*
- * Get texture dimensions by path
- * Returns true if found, false otherwise
- */
-static bool texture_get_size(texture_manager_t *tm, const char *path,
-                             int *width, int *height) {
-    for (int i = 0; i < tm->count; i++) {
-        if (strcmp(tm->entries[i].path, path) == 0) {
-            *width = tm->entries[i].width;
-            *height = tm->entries[i].height;
-            return true;
-        }
-    }
-    return false;
-}
-
-/*
- * Clean up all loaded textures
- */
-static void texture_manager_cleanup(texture_manager_t *tm) {
-    for (int i = 0; i < tm->count; i++) {
-        if (tm->entries[i].texture) {
-            SDL_DestroyTexture(tm->entries[i].texture);
-            tm->entries[i].texture = NULL;
-        }
-        tm->entries[i].path[0] = '\0';
-    }
-    tm->count = 0;
-    printf("Texture manager cleaned up\n");
-}
-
-/* ============================================================================
- * TEXTURE CREATION HELPERS
- * ============================================================================ */
-
-/*
- * Create a colored rectangle texture programmatically
- *
- * SDL surfaces are CPU-side image data that can be manipulated directly.
- * SDL textures are GPU-side and optimized for rendering.
- * We create a surface, fill it with color, then convert to texture.
- */
-static SDL_Texture *create_colored_texture(SDL_Renderer *renderer,
-                                           int width, int height,
-                                           Uint8 r, Uint8 g, Uint8 b) {
-    /* Create a 32-bit RGBA surface */
-    SDL_Surface *surface = SDL_CreateRGBSurface(
-        0,              /* flags (unused) */
-        width, height,  /* dimensions */
-        32,             /* bits per pixel */
-        0x00FF0000,     /* red mask */
-        0x0000FF00,     /* green mask */
-        0x000000FF,     /* blue mask */
-        0xFF000000      /* alpha mask */
-    );
-
-    if (!surface) {
-        fprintf(stderr, "Failed to create surface: %s\n", SDL_GetError());
-        return NULL;
-    }
-
-    /* Fill the surface with the specified color */
-    SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, r, g, b));
-
-    /* Convert surface to texture for GPU-accelerated rendering */
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-
-    /* Free the surface - we only need the texture now */
-    SDL_FreeSurface(surface);
-
-    if (!texture) {
-        fprintf(stderr, "Failed to create texture: %s\n", SDL_GetError());
-    }
-
-    return texture;
-}
-
 /* STRESS_TEST - Spawns/despawns test sprites for performance testing */
 static void stress_test_toggle(game_state_t *game) {
     if (game->stress_test_active) {
@@ -429,7 +228,7 @@ static void stress_test_toggle(game_state_t *game) {
         int spawned = 0;
         for (int i = 0; i < STRESS_TEST_SPRITE_COUNT && game->sprite_count < SPRITE_MAX_COUNT; i++) {
             sprite_t *spr = &game->sprites[game->sprite_count++];
-            spr->texture = create_colored_texture(game->renderer, 32, 32,
+            spr->texture = texture_create_colored(game->renderer, 32, 32,
                 (Uint8)(rand() % 256), (Uint8)(rand() % 256), (Uint8)(rand() % 256));
             /* Scatter across a larger world area */
             spr->x = (float)(rand() % (WINDOW_WIDTH * 2)) - WINDOW_WIDTH / 2;
@@ -533,7 +332,7 @@ static bool game_init(game_state_t *game) {
     if (!player->texture) {
         /* Fallback: create programmatic sprite */
         printf("Creating fallback player sprite\n");
-        player->texture = create_colored_texture(game->renderer,
+        player->texture = texture_create_colored(game->renderer,
             SPRITE_WIDTH, SPRITE_HEIGHT,
             COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
         if (!player->texture) {
@@ -557,7 +356,7 @@ static bool game_init(game_state_t *game) {
 
     /* Add test sprite (index 1) */
     sprite_t *test = &game->sprites[game->sprite_count++];
-    test->texture = create_colored_texture(game->renderer,
+    test->texture = texture_create_colored(game->renderer,
         SPRITE_WIDTH, SPRITE_HEIGHT, 255, 100, 100);  /* Red-ish color */
     test->x = 100.0f;
     test->y = 100.0f;
@@ -578,7 +377,7 @@ static bool game_init(game_state_t *game) {
     if (!game->background) {
         /* Fallback: create simple tiled background texture */
         printf("Creating fallback background\n");
-        game->background = create_colored_texture(game->renderer,
+        game->background = texture_create_colored(game->renderer,
             WINDOW_WIDTH, WINDOW_HEIGHT,
             COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
     }

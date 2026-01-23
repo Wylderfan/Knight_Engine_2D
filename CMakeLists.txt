@@ -17,6 +17,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 # Source files - will grow as we modularize
 set(SOURCES
     src/main.c
+    src/graphics/camera.c
+    src/graphics/texture.c
     src/input/input.c
 )
 
