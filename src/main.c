@@ -12,30 +12,10 @@
 
 #include "core/config.h"
 #include "graphics/camera.h"
+#include "graphics/sprite.h"
 #include "graphics/texture.h"
 #include "input/input.h"
 #include "input/input_config.h"
-
-/*
- * Sprite structure - represents any renderable game object
- * Combines position, velocity, dimensions, and texture into one unit.
- * Using floats for position/velocity enables smooth sub-pixel movement.
- */
-typedef struct {
-    float x;
-    float y;
-    float vel_x;
-    float vel_y;
-    int width;
-    int height;
-    int z_index;          /* Render order: 0 = background, 50 = entities, 100 = UI */
-    double angle;         /* Rotation in degrees (clockwise) */
-    SDL_RendererFlip flip; /* SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL */
-    SDL_Texture *texture;
-    /* Debug visualization */
-    bool show_debug_bounds;  /* Draw bounding box when debug mode is on */
-    Uint8 debug_r, debug_g, debug_b;  /* Debug border color */
-} sprite_t;
 
 /*
  * Game state structure - holds all SDL resources and game data
@@ -60,72 +40,6 @@ typedef struct {
     bool stress_test_active;
     int stress_test_base_index;  /* First index of stress test sprites */
 } game_state_t;
-
-/*
- * Render a sprite to the screen
- * Call this for each sprite during the render phase.
- *
- * camera:   Camera for world-to-screen coordinate conversion.
- * src_rect: Optional source rectangle for sprite sheets.
- *           Pass NULL to render the entire texture.
- *           When non-NULL, specifies which portion of the texture to render.
- */
-static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
-                          const camera_t *camera, const SDL_Rect *src_rect) {
-    if (!sprite->texture) {
-        return;
-    }
-
-    int screen_x, screen_y;
-    world_to_screen(camera, sprite->x, sprite->y, &screen_x, &screen_y);
-
-    SDL_Rect dest_rect = {
-        screen_x,
-        screen_y,
-        sprite->width,
-        sprite->height
-    };
-
-    SDL_RenderCopy(renderer, sprite->texture, src_rect, &dest_rect);
-}
-
-/*
- * Render a sprite with extended options (rotation, flip, color modulation)
- *
- * camera:   Camera for world-to-screen coordinate conversion.
- * src_rect:  Optional source rectangle for sprite sheets (NULL = full texture)
- * angle:     Rotation in degrees (clockwise)
- * center:    Point to rotate around (NULL = center of sprite)
- * flip:      SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL, or combined
- * r, g, b:   Color modulation (255 = no change, lower = tint toward that color)
- */
-static void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
-                             const camera_t *camera, const SDL_Rect *src_rect,
-                             double angle, const SDL_Point *center,
-                             SDL_RendererFlip flip, Uint8 r, Uint8 g, Uint8 b) {
-    if (!sprite->texture) {
-        return;
-    }
-
-    int screen_x, screen_y;
-    world_to_screen(camera, sprite->x, sprite->y, &screen_x, &screen_y);
-
-    SDL_Rect dest_rect = {
-        screen_x,
-        screen_y,
-        sprite->width,
-        sprite->height
-    };
-
-    /* Apply color modulation */
-    SDL_SetTextureColorMod(sprite->texture, r, g, b);
-
-    SDL_RenderCopyEx(renderer, sprite->texture, src_rect, &dest_rect,
-                     angle, center, flip);
-
-    /* Reset color modulation to default */
-    SDL_SetTextureColorMod(sprite->texture, 255, 255, 255);
-}
 
 /* ============================================================================
  * DEBUG UTILITIES - Visual debugging tools

@@ -16,7 +16,7 @@
 /*
  * Camera structure - defines the visible area of the world
  */
-typedef struct {
+typedef struct camera_t {
     float x;  /* World x position of camera's top-left corner */
     float y;  /* World y position of camera's top-left corner */
 } camera_t;
