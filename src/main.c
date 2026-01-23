@@ -78,6 +78,15 @@
 #define KEY_QUIT     SDLK_ESCAPE
 #define KEY_QUIT_ALT SDLK_q
 
+/* Camera movement keys (IJKL) */
+#define KEY_CAM_UP    SDL_SCANCODE_I
+#define KEY_CAM_DOWN  SDL_SCANCODE_K
+#define KEY_CAM_LEFT  SDL_SCANCODE_J
+#define KEY_CAM_RIGHT SDL_SCANCODE_L
+
+/* Camera movement speed */
+#define CAMERA_SPEED 200.0f
+
 /* Input system settings */
 #define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
 
@@ -136,6 +145,35 @@ static bool input_key_released(const input_state_t *input, SDL_Scancode key) {
     return !input->current[key] && input->previous[key];
 }
 
+/* ============================================================================
+ * CAMERA SYSTEM - World vs screen coordinate management
+ * ============================================================================
+ *
+ * Coordinate Systems:
+ * - World coordinates: Position in the game world (can extend beyond screen)
+ * - Screen coordinates: Position on the visible display (0,0 = top-left)
+ *
+ * The camera defines which portion of the world is visible on screen.
+ * Objects at world position (x, y) appear at screen position (x - camera.x, y - camera.y)
+ */
+
+/*
+ * Camera structure - defines the visible area of the world
+ */
+typedef struct {
+    float x;  /* World x position of camera's top-left corner */
+    float y;  /* World y position of camera's top-left corner */
+} camera_t;
+
+/*
+ * Convert world coordinates to screen coordinates
+ */
+static void world_to_screen(const camera_t *camera, float world_x, float world_y,
+                            int *screen_x, int *screen_y) {
+    *screen_x = (int)(world_x - camera->x);
+    *screen_y = (int)(world_y - camera->y);
+}
+
 /* Texture manager settings */
 #define TEXTURE_MAX_ENTRIES  32
 #define TEXTURE_PATH_MAX_LEN 128
@@ -189,6 +227,7 @@ typedef struct {
     SDL_Renderer *renderer;
     texture_manager_t textures;
     input_state_t input;
+    camera_t camera;
     sprite_t sprites[SPRITE_MAX_COUNT];
     int sprite_count;
     int player_index;  /* Index of player sprite in the array */
@@ -200,19 +239,23 @@ typedef struct {
  * Render a sprite to the screen
  * Call this for each sprite during the render phase.
  *
+ * camera:   Camera for world-to-screen coordinate conversion.
  * src_rect: Optional source rectangle for sprite sheets.
  *           Pass NULL to render the entire texture.
  *           When non-NULL, specifies which portion of the texture to render.
  */
 static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
-                          const SDL_Rect *src_rect) {
+                          const camera_t *camera, const SDL_Rect *src_rect) {
     if (!sprite->texture) {
         return;
     }
 
+    int screen_x, screen_y;
+    world_to_screen(camera, sprite->x, sprite->y, &screen_x, &screen_y);
+
     SDL_Rect dest_rect = {
-        (int)sprite->x,
-        (int)sprite->y,
+        screen_x,
+        screen_y,
         sprite->width,
         sprite->height
     };
@@ -223,6 +266,7 @@ static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
 /*
  * Render a sprite with extended options (rotation, flip, color modulation)
  *
+ * camera:   Camera for world-to-screen coordinate conversion.
  * src_rect:  Optional source rectangle for sprite sheets (NULL = full texture)
  * angle:     Rotation in degrees (clockwise)
  * center:    Point to rotate around (NULL = center of sprite)
@@ -230,16 +274,19 @@ static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
  * r, g, b:   Color modulation (255 = no change, lower = tint toward that color)
  */
 static void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
-                             const SDL_Rect *src_rect, double angle,
-                             const SDL_Point *center, SDL_RendererFlip flip,
-                             Uint8 r, Uint8 g, Uint8 b) {
+                             const camera_t *camera, const SDL_Rect *src_rect,
+                             double angle, const SDL_Point *center,
+                             SDL_RendererFlip flip, Uint8 r, Uint8 g, Uint8 b) {
     if (!sprite->texture) {
         return;
     }
 
+    int screen_x, screen_y;
+    world_to_screen(camera, sprite->x, sprite->y, &screen_x, &screen_y);
+
     SDL_Rect dest_rect = {
-        (int)sprite->x,
-        (int)sprite->y,
+        screen_x,
+        screen_y,
         sprite->width,
         sprite->height
     };
@@ -467,6 +514,10 @@ static bool game_init(game_state_t *game) {
     /* Initialize input system */
     input_init(&game->input);
 
+    /* Initialize camera at origin */
+    game->camera.x = 0.0f;
+    game->camera.y = 0.0f;
+
     /* Initialize sprite list */
     game->sprite_count = 0;
 
@@ -634,23 +685,43 @@ static void game_process_input(game_state_t *game) {
  */
 static void game_update(game_state_t *game, float delta_time) {
     sprite_t *player = &game->sprites[game->player_index];
+    const input_state_t *input = &game->input;
+
+    /* Update camera position (IJKL keys) */
+    if (input_key_down(input, KEY_CAM_UP)) {
+        game->camera.y -= CAMERA_SPEED * delta_time;
+    }
+    if (input_key_down(input, KEY_CAM_DOWN)) {
+        game->camera.y += CAMERA_SPEED * delta_time;
+    }
+    if (input_key_down(input, KEY_CAM_LEFT)) {
+        game->camera.x -= CAMERA_SPEED * delta_time;
+    }
+    if (input_key_down(input, KEY_CAM_RIGHT)) {
+        game->camera.x += CAMERA_SPEED * delta_time;
+    }
 
     /* Update player position based on velocity and delta time */
     player->x += player->vel_x * delta_time;
     player->y += player->vel_y * delta_time;
 
-    /* Clamp player position to screen boundaries */
-    if (player->x < 0) {
-        player->x = 0;
+    /* Clamp player position to camera's visible area (world coordinates) */
+    float cam_left = game->camera.x;
+    float cam_right = game->camera.x + WINDOW_WIDTH - player->width;
+    float cam_top = game->camera.y;
+    float cam_bottom = game->camera.y + WINDOW_HEIGHT - player->height;
+
+    if (player->x < cam_left) {
+        player->x = cam_left;
     }
-    if (player->x > WINDOW_WIDTH - player->width) {
-        player->x = WINDOW_WIDTH - player->width;
+    if (player->x > cam_right) {
+        player->x = cam_right;
     }
-    if (player->y < 0) {
-        player->y = 0;
+    if (player->y < cam_top) {
+        player->y = cam_top;
     }
-    if (player->y > WINDOW_HEIGHT - player->height) {
-        player->y = WINDOW_HEIGHT - player->height;
+    if (player->y > cam_bottom) {
+        player->y = cam_bottom;
     }
 }
 
@@ -679,11 +750,11 @@ static void game_render(game_state_t *game) {
             sprite_t *spr = &game->sprites[i];
             if (spr->z_index == z) {
                 if (spr->angle != 0.0 || spr->flip != SDL_FLIP_NONE) {
-                    sprite_render_ex(game->renderer, spr, NULL,
+                    sprite_render_ex(game->renderer, spr, &game->camera, NULL,
                                      spr->angle, NULL, spr->flip,
                                      255, 255, 255);
                 } else {
-                    sprite_render(game->renderer, spr, NULL);
+                    sprite_render(game->renderer, spr, &game->camera, NULL);
                 }
             }
         }
