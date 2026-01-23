@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* ============================================================================
  * CONFIGURATION - Adjust these values to customize game behavior
@@ -86,6 +87,12 @@
 
 /* Camera movement speed */
 #define CAMERA_SPEED 200.0f
+
+/* Debug key */
+#define KEY_DEBUG_TOGGLE SDL_SCANCODE_P
+
+/* Debug output interval (milliseconds) */
+#define DEBUG_OUTPUT_INTERVAL 500
 
 /* Input system settings */
 #define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
@@ -197,6 +204,9 @@ typedef struct {
     double angle;         /* Rotation in degrees (clockwise) */
     SDL_RendererFlip flip; /* SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL */
     SDL_Texture *texture;
+    /* Debug visualization */
+    bool show_debug_bounds;  /* Draw bounding box when debug mode is on */
+    Uint8 debug_r, debug_g, debug_b;  /* Debug border color */
 } sprite_t;
 
 /*
@@ -233,6 +243,11 @@ typedef struct {
     int player_index;  /* Index of player sprite in the array */
     SDL_Texture *background;
     bool running;
+    /* Debug state */
+    bool debug_enabled;
+    Uint32 debug_last_output;  /* Last time debug info was printed */
+    float debug_fps;           /* Current FPS for debug display */
+    float debug_delta_time;    /* Current delta time for debug display */
 } game_state_t;
 
 /*
@@ -299,6 +314,89 @@ static void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
 
     /* Reset color modulation to default */
     SDL_SetTextureColorMod(sprite->texture, 255, 255, 255);
+}
+
+/* ============================================================================
+ * DEBUG UTILITIES - Visual debugging tools
+ * ============================================================================ */
+
+/*
+ * Draw a colored rectangle outline (for collision boxes, debug bounds, etc.)
+ * Uses world coordinates - converts to screen space using camera.
+ */
+static void debug_draw_rect(SDL_Renderer *renderer, const camera_t *camera,
+                            float world_x, float world_y, int width, int height,
+                            Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+    int screen_x, screen_y;
+    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
+
+    SDL_Rect rect = { screen_x, screen_y, width, height };
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_RenderDrawRect(renderer, &rect);
+}
+
+/*
+ * Draw a filled colored rectangle (for debug visualization)
+ * Uses world coordinates - converts to screen space using camera.
+ */
+static void debug_fill_rect(SDL_Renderer *renderer, const camera_t *camera,
+                            float world_x, float world_y, int width, int height,
+                            Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+    int screen_x, screen_y;
+    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
+
+    SDL_Rect rect = { screen_x, screen_y, width, height };
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_RenderFillRect(renderer, &rect);
+}
+
+/*
+ * Draw a rotated rectangle outline (for debug bounds on rotated sprites)
+ * Angle is in degrees (clockwise), rotation is around the center of the rect.
+ */
+static void debug_draw_rect_rotated(SDL_Renderer *renderer, const camera_t *camera,
+                                    float world_x, float world_y, int width, int height,
+                                    double angle, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+    int screen_x, screen_y;
+    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
+
+    /* Center of the rectangle */
+    float cx = screen_x + width / 2.0f;
+    float cy = screen_y + height / 2.0f;
+
+    /* Convert angle to radians (SDL uses clockwise degrees) */
+    double rad = angle * M_PI / 180.0;
+    float cos_a = (float)cos(rad);
+    float sin_a = (float)sin(rad);
+
+    /* Four corners relative to center (before rotation) */
+    float hw = width / 2.0f;
+    float hh = height / 2.0f;
+
+    /* Rotate each corner around center */
+    SDL_Point corners[4];
+    float offsets[4][2] = {
+        { -hw, -hh },  /* Top-left */
+        {  hw, -hh },  /* Top-right */
+        {  hw,  hh },  /* Bottom-right */
+        { -hw,  hh }   /* Bottom-left */
+    };
+
+    for (int i = 0; i < 4; i++) {
+        float rx = offsets[i][0] * cos_a - offsets[i][1] * sin_a;
+        float ry = offsets[i][0] * sin_a + offsets[i][1] * cos_a;
+        corners[i].x = (int)(cx + rx);
+        corners[i].y = (int)(cy + ry);
+    }
+
+    /* Draw lines between corners */
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_RenderDrawLine(renderer, corners[0].x, corners[0].y, corners[1].x, corners[1].y);
+    SDL_RenderDrawLine(renderer, corners[1].x, corners[1].y, corners[2].x, corners[2].y);
+    SDL_RenderDrawLine(renderer, corners[2].x, corners[2].y, corners[3].x, corners[3].y);
+    SDL_RenderDrawLine(renderer, corners[3].x, corners[3].y, corners[0].x, corners[0].y);
 }
 
 /* ============================================================================
@@ -518,6 +616,12 @@ static bool game_init(game_state_t *game) {
     game->camera.x = 0.0f;
     game->camera.y = 0.0f;
 
+    /* Initialize debug state */
+    game->debug_enabled = false;
+    game->debug_last_output = 0;
+    game->debug_fps = 0.0f;
+    game->debug_delta_time = 0.0f;
+
     /* Initialize sprite list */
     game->sprite_count = 0;
 
@@ -545,6 +649,10 @@ static bool game_init(game_state_t *game) {
     player->z_index = 50;  /* Entity layer */
     player->angle = 0.0;
     player->flip = SDL_FLIP_NONE;
+    player->show_debug_bounds = true;
+    player->debug_r = 0;
+    player->debug_g = 255;
+    player->debug_b = 0;  /* Green border */
 
     /* Add test sprite (index 1) */
     sprite_t *test = &game->sprites[game->sprite_count++];
@@ -559,6 +667,10 @@ static bool game_init(game_state_t *game) {
     test->z_index = 40;  /* Below player layer */
     test->angle = 45.0;  /* Rotated 45 degrees to demonstrate */
     test->flip = SDL_FLIP_NONE;
+    test->show_debug_bounds = true;
+    test->debug_r = 255;
+    test->debug_g = 255;
+    test->debug_b = 0;  /* Yellow border */
 
     /* Load background texture */
     game->background = texture_load(&game->textures, "assets/background.png");
@@ -687,6 +799,12 @@ static void game_update(game_state_t *game, float delta_time) {
     sprite_t *player = &game->sprites[game->player_index];
     const input_state_t *input = &game->input;
 
+    /* Toggle debug mode with P key */
+    if (input_key_pressed(input, KEY_DEBUG_TOGGLE)) {
+        game->debug_enabled = !game->debug_enabled;
+        printf("[DEBUG] Debug mode %s\n", game->debug_enabled ? "ENABLED" : "DISABLED");
+    }
+
     /* Update camera position (IJKL keys) */
     if (input_key_down(input, KEY_CAM_UP)) {
         game->camera.y -= CAMERA_SPEED * delta_time;
@@ -755,6 +873,14 @@ static void game_render(game_state_t *game) {
                                      255, 255, 255);
                 } else {
                     sprite_render(game->renderer, spr, &game->camera, NULL);
+                }
+
+                /* Draw debug bounds when debug mode is enabled */
+                if (game->debug_enabled && spr->show_debug_bounds) {
+                    debug_draw_rect_rotated(game->renderer, &game->camera,
+                                            spr->x, spr->y, spr->width, spr->height,
+                                            spr->angle,
+                                            spr->debug_r, spr->debug_g, spr->debug_b, 255);
                 }
             }
         }
@@ -841,6 +967,25 @@ int main(int argc, char *argv[]) {
 #endif
         }
 #endif
+
+        /* Store debug values */
+        game.debug_fps = current_fps;
+        game.debug_delta_time = delta_time;
+
+        /* Debug output (when enabled) */
+        if (game.debug_enabled &&
+            current_time - game.debug_last_output >= DEBUG_OUTPUT_INTERVAL) {
+            game.debug_last_output = current_time;
+            printf("[DEBUG] FPS: %.1f | Delta: %.4fs (%.2fms) | "
+                   "Player: (%.1f, %.1f) | Camera: (%.1f, %.1f)\n",
+                   game.debug_fps,
+                   game.debug_delta_time,
+                   game.debug_delta_time * 1000.0f,
+                   game.sprites[game.player_index].x,
+                   game.sprites[game.player_index].y,
+                   game.camera.x,
+                   game.camera.y);
+        }
 
         /* Update input state (must be called before processing input) */
         input_update(&game.input);
