@@ -12,6 +12,7 @@
 
 #include "core/config.h"
 #include "graphics/camera.h"
+#include "graphics/renderer.h"
 #include "graphics/sprite.h"
 #include "graphics/texture.h"
 #include "input/input.h"
@@ -23,8 +24,7 @@
  * Game state structure - holds all SDL resources and game data
  */
 typedef struct {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
+    renderer_t renderer;
     texture_manager_t textures;
     input_state_t input;
     camera_t camera;
@@ -61,7 +61,7 @@ static void stress_test_toggle(game_state_t *game) {
         int spawned = 0;
         for (int i = 0; i < STRESS_TEST_SPRITE_COUNT && game->sprite_count < SPRITE_MAX_COUNT; i++) {
             sprite_t *spr = &game->sprites[game->sprite_count++];
-            spr->texture = texture_create_colored(game->renderer, 32, 32,
+            spr->texture = texture_create_colored(renderer_get_sdl(&game->renderer), 32, 32,
                 (Uint8)(rand() % 256), (Uint8)(rand() % 256), (Uint8)(rand() % 256));
             /* Scatter across a larger world area */
             spr->x = (float)(rand() % (WINDOW_WIDTH * 2)) - WINDOW_WIDTH / 2;
@@ -83,60 +83,16 @@ static void stress_test_toggle(game_state_t *game) {
 }
 
 /*
- * Initialize SDL subsystems, create window and renderer
- *
- * The renderer is the core of SDL2's 2D rendering API.
- * It provides hardware-accelerated drawing operations and manages
- * textures on the GPU.
+ * Initialize game - sets up renderer, textures, and initial game state
  */
 static bool game_init(game_state_t *game) {
-    /* Initialize SDL video subsystem */
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return false;
-    }
-
-    /* Initialize SDL_image for PNG loading (optional but nice to have) */
-    int img_flags = IMG_INIT_PNG;
-    if ((IMG_Init(img_flags) & img_flags) != img_flags) {
-        fprintf(stderr, "SDL_image init warning: %s\n", IMG_GetError());
-        /* Continue anyway - we can fall back to programmatic sprites */
-    }
-
-    /* Create the game window */
-    game->window = SDL_CreateWindow(
-        WINDOW_TITLE,                       /* title */
-        SDL_WINDOWPOS_CENTERED,             /* x position */
-        SDL_WINDOWPOS_CENTERED,             /* y position */
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        SDL_WINDOW_SHOWN                    /* flags */
-    );
-
-    if (!game->window) {
-        fprintf(stderr, "Window creation failed: %s\n", SDL_GetError());
-        return false;
-    }
-
-    /*
-     * Create the renderer with hardware acceleration
-     *
-     * SDL_RENDERER_ACCELERATED: Use GPU for rendering
-     * SDL_RENDERER_PRESENTVSYNC: Sync with monitor refresh rate
-     */
-    game->renderer = SDL_CreateRenderer(
-        game->window,
-        -1,  /* Use first available rendering driver */
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
-    );
-
-    if (!game->renderer) {
-        fprintf(stderr, "Renderer creation failed: %s\n", SDL_GetError());
+    /* Initialize rendering system */
+    if (!renderer_init(&game->renderer, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT)) {
         return false;
     }
 
     /* Initialize texture manager */
-    texture_manager_init(&game->textures, game->renderer);
+    texture_manager_init(&game->textures, renderer_get_sdl(&game->renderer));
 
     /* Initialize input system */
     input_init(&game->input);
@@ -165,7 +121,7 @@ static bool game_init(game_state_t *game) {
     if (!player->texture) {
         /* Fallback: create programmatic sprite */
         printf("Creating fallback player sprite\n");
-        player->texture = texture_create_colored(game->renderer,
+        player->texture = texture_create_colored(renderer_get_sdl(&game->renderer),
             SPRITE_WIDTH, SPRITE_HEIGHT,
             COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
         if (!player->texture) {
@@ -189,7 +145,7 @@ static bool game_init(game_state_t *game) {
 
     /* Add test sprite (index 1) */
     sprite_t *test = &game->sprites[game->sprite_count++];
-    test->texture = texture_create_colored(game->renderer,
+    test->texture = texture_create_colored(renderer_get_sdl(&game->renderer),
         SPRITE_WIDTH, SPRITE_HEIGHT, 255, 100, 100);  /* Red-ish color */
     test->x = 100.0f;
     test->y = 100.0f;
@@ -210,7 +166,7 @@ static bool game_init(game_state_t *game) {
     if (!game->background) {
         /* Fallback: create simple tiled background texture */
         printf("Creating fallback background\n");
-        game->background = texture_create_colored(game->renderer,
+        game->background = texture_create_colored(renderer_get_sdl(&game->renderer),
             WINDOW_WIDTH, WINDOW_HEIGHT,
             COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
     }
@@ -241,22 +197,15 @@ static void game_cleanup(game_state_t *game) {
         }
     }
     if (game->background &&
-        !texture_get(&game->textures, "assets/background.png")) {
+        !texture_get(&game->textures, BACKGROUND_TEXTURE_PATH)) {
         SDL_DestroyTexture(game->background);
     }
 
     /* Clean up texture manager (handles all file-loaded textures) */
     texture_manager_cleanup(&game->textures);
 
-    if (game->renderer) {
-        SDL_DestroyRenderer(game->renderer);
-    }
-    if (game->window) {
-        SDL_DestroyWindow(game->window);
-    }
-
-    IMG_Quit();
-    SDL_Quit();
+    /* Clean up renderer (also calls SDL_Quit and IMG_Quit) */
+    renderer_cleanup(&game->renderer);
 
     printf("Game cleaned up\n");
 }
@@ -403,14 +352,14 @@ static void game_update(game_state_t *game, float delta_time) {
  * 3. Present the frame (swap buffers to display)
  */
 static void game_render(game_state_t *game) {
+    SDL_Renderer *sdl_renderer = renderer_get_sdl(&game->renderer);
+
     /* Clear screen with background color */
-    SDL_SetRenderDrawColor(game->renderer,
-                           COLOR_BG_R, COLOR_BG_G, COLOR_BG_B, 255);
-    SDL_RenderClear(game->renderer);
+    renderer_clear(&game->renderer, COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
 
     /* Render background texture (covers full window) */
     if (game->background) {
-        SDL_RenderCopy(game->renderer, game->background, NULL, NULL);
+        SDL_RenderCopy(sdl_renderer, game->background, NULL, NULL);
     }
 
     /* Render all sprites sorted by z_index (lower z renders first = behind) */
@@ -419,16 +368,16 @@ static void game_render(game_state_t *game) {
             sprite_t *spr = &game->sprites[i];
             if (spr->z_index == z) {
                 if (spr->angle != 0.0 || spr->flip != SDL_FLIP_NONE) {
-                    sprite_render_ex(game->renderer, spr, &game->camera, NULL,
+                    sprite_render_ex(sdl_renderer, spr, &game->camera, NULL,
                                      spr->angle, NULL, spr->flip,
                                      255, 255, 255);
                 } else {
-                    sprite_render(game->renderer, spr, &game->camera, NULL);
+                    sprite_render(sdl_renderer, spr, &game->camera, NULL);
                 }
 
                 /* Draw debug bounds when debug mode is enabled */
                 if (game->debug_enabled && spr->show_debug_bounds) {
-                    debug_draw_rect_rotated(game->renderer, &game->camera,
+                    debug_draw_rect_rotated(sdl_renderer, &game->camera,
                                             spr->x, spr->y, spr->width, spr->height,
                                             spr->angle,
                                             spr->debug_r, spr->debug_g, spr->debug_b, 255);
@@ -437,8 +386,8 @@ static void game_render(game_state_t *game) {
         }
     }
 
-    /* Present the frame - this displays everything we've drawn */
-    SDL_RenderPresent(game->renderer);
+    /* Present the frame */
+    renderer_present(&game->renderer);
 }
 
 /*
@@ -507,7 +456,7 @@ int main(int argc, char *argv[]) {
             char title_buffer[128];
             snprintf(title_buffer, sizeof(title_buffer), "%s - %.1f FPS",
                      WINDOW_TITLE, current_fps);
-            SDL_SetWindowTitle(game.window, title_buffer);
+            renderer_set_title(&game.renderer, title_buffer);
 #endif
 
 #if FPS_DEBUG_LOG

@@ -18,6 +18,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 set(SOURCES
     src/main.c
     src/graphics/camera.c
+    src/graphics/renderer.c
     src/graphics/sprite.c
     src/graphics/texture.c
     src/input/input.c
