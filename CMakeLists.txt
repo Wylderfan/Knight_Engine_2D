@@ -21,6 +21,8 @@ set(SOURCES
     src/graphics/sprite.c
     src/graphics/texture.c
     src/input/input.c
+    src/util/debug.c
+    src/util/timer.c
 )
 
 # Create executable
