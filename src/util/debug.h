@@ -8,8 +8,9 @@
 
 #include <SDL2/SDL.h>
 
-/* Forward declaration */
+/* Forward declarations */
 typedef struct camera_t camera_t;
+typedef struct game_state_t game_state_t;
 
 /*
  * Draw a colored rectangle outline (for collision boxes, debug bounds, etc.)
@@ -34,3 +35,8 @@ void debug_fill_rect(SDL_Renderer *renderer, const camera_t *camera,
 void debug_draw_rect_rotated(SDL_Renderer *renderer, const camera_t *camera,
                              float world_x, float world_y, int width, int height,
                              double angle, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
+
+/*
+ * Toggle stress test mode - spawns/despawns test sprites for performance testing
+ */
+void debug_stress_test_toggle(game_state_t *game);

@@ -6,7 +6,6 @@
 #include <SDL2/SDL_image.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>  /* STRESS_TEST - for rand() */
 #include <string.h>
 
 #include "core/config.h"
@@ -18,45 +17,6 @@
 #include "input/input.h"
 #include "input/input_config.h"
 #include "util/debug.h"
-
-/* STRESS_TEST - Spawns/despawns test sprites for performance testing */
-static void stress_test_toggle(game_state_t *game) {
-    if (game->stress_test_active) {
-        /* Despawn: destroy textures and reset count */
-        for (int i = game->stress_test_base_index; i < game->sprite_count; i++) {
-            if (game->sprites[i].texture) {
-                SDL_DestroyTexture(game->sprites[i].texture);
-            }
-        }
-        game->sprite_count = game->stress_test_base_index;
-        game->stress_test_active = false;
-        printf("[STRESS_TEST] Disabled - %d sprites now active\n", game->sprite_count);
-    } else {
-        /* Spawn stress test sprites */
-        game->stress_test_base_index = game->sprite_count;
-        int spawned = 0;
-        for (int i = 0; i < STRESS_TEST_SPRITE_COUNT && game->sprite_count < SPRITE_MAX_COUNT; i++) {
-            sprite_t *spr = &game->sprites[game->sprite_count++];
-            spr->texture = texture_create_colored(renderer_get_sdl(&game->renderer), 32, 32,
-                (Uint8)(rand() % 256), (Uint8)(rand() % 256), (Uint8)(rand() % 256));
-            /* Scatter across a larger world area */
-            spr->x = (float)(rand() % (WINDOW_WIDTH * 2)) - WINDOW_WIDTH / 2;
-            spr->y = (float)(rand() % (WINDOW_HEIGHT * 2)) - WINDOW_HEIGHT / 2;
-            spr->vel_x = (float)(rand() % 100 - 50);  /* Random velocity */
-            spr->vel_y = (float)(rand() % 100 - 50);
-            spr->width = 32;
-            spr->height = 32;
-            spr->z_index = 30 + (rand() % 20);  /* z 30-49, below player */
-            spr->angle = (double)(rand() % 360);
-            spr->flip = SDL_FLIP_NONE;
-            spr->show_debug_bounds = false;  /* Too cluttered with 100+ */
-            spawned++;
-        }
-        game->stress_test_active = true;
-        printf("[STRESS_TEST] Enabled - spawned %d sprites (%d total)\n",
-               spawned, game->sprite_count);
-    }
-}
 
 /*
  * Initialize game - sets up renderer, textures, and initial game state
@@ -265,7 +225,7 @@ static void game_update(game_state_t *game, float delta_time) {
 
     /* STRESS_TEST - Toggle with T key */
     if (input_key_pressed(input, KEY_STRESS_TEST)) {
-        stress_test_toggle(game);
+        debug_stress_test_toggle(game);
     }
 
     /* Update camera position (IJKL keys) */

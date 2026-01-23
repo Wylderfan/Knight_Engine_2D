@@ -18,7 +18,7 @@
 /*
  * Game state structure - holds all game resources and data
  */
-typedef struct {
+typedef struct game_state_t {
     renderer_t renderer;
     texture_manager_t textures;
     input_state_t input;
