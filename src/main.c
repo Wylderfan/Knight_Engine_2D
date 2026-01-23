@@ -203,6 +203,9 @@ typedef struct {
     double angle;         /* Rotation in degrees (clockwise) */
     SDL_RendererFlip flip; /* SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL */
     SDL_Texture *texture;
+    /* Debug visualization */
+    bool show_debug_bounds;  /* Draw bounding box when debug mode is on */
+    Uint8 debug_r, debug_g, debug_b;  /* Debug border color */
 } sprite_t;
 
 /*
@@ -598,6 +601,10 @@ static bool game_init(game_state_t *game) {
     player->z_index = 50;  /* Entity layer */
     player->angle = 0.0;
     player->flip = SDL_FLIP_NONE;
+    player->show_debug_bounds = true;
+    player->debug_r = 0;
+    player->debug_g = 255;
+    player->debug_b = 0;  /* Green border */
 
     /* Add test sprite (index 1) */
     sprite_t *test = &game->sprites[game->sprite_count++];
@@ -612,6 +619,10 @@ static bool game_init(game_state_t *game) {
     test->z_index = 40;  /* Below player layer */
     test->angle = 45.0;  /* Rotated 45 degrees to demonstrate */
     test->flip = SDL_FLIP_NONE;
+    test->show_debug_bounds = true;
+    test->debug_r = 255;
+    test->debug_g = 255;
+    test->debug_b = 0;  /* Yellow border */
 
     /* Load background texture */
     game->background = texture_load(&game->textures, "assets/background.png");
@@ -814,6 +825,13 @@ static void game_render(game_state_t *game) {
                                      255, 255, 255);
                 } else {
                     sprite_render(game->renderer, spr, &game->camera, NULL);
+                }
+
+                /* Draw debug bounds when debug mode is enabled */
+                if (game->debug_enabled && spr->show_debug_bounds) {
+                    debug_draw_rect(game->renderer, &game->camera,
+                                    spr->x, spr->y, spr->width, spr->height,
+                                    spr->debug_r, spr->debug_g, spr->debug_b, 255);
                 }
             }
         }
