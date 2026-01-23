@@ -12,7 +12,6 @@
 #include "input/input.h"
 #include "input/input_config.h"
 #include "util/debug.h"
-#include "util/timer.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 
@@ -87,9 +86,6 @@ bool engine_init(game_state_t *game) {
 
     /* Initialize input system */
     input_init(&game->input);
-
-    /* Initialize FPS counter */
-    fps_counter_init(&game->fps);
 
     /* Initialize camera at origin */
     game->camera.x = 0.0f;
@@ -193,11 +189,13 @@ void engine_cleanup(game_state_t *game) {
 void engine_run(game_state_t *game) {
     printf("Controls: Arrow keys or WASD to move, P=debug, T=stress test, ESC to quit\n");
 
-    /* Re-initialize FPS counter at loop start for accurate timing */
-    fps_counter_init(&game->fps);
-
     Uint32 last_time = SDL_GetTicks();
     float accumulator = 0.0f;
+
+    /* FPS counter variables - same as original */
+    Uint32 fps_last_time = SDL_GetTicks();
+    int frame_count = 0;
+    float current_fps = 0.0f;
 
     while (game->running) {
         Uint32 current_time = SDL_GetTicks();
@@ -208,9 +206,13 @@ void engine_run(game_state_t *game) {
             delta_time = MAX_DELTA_TIME;
         }
 
-        /* Update FPS counter (debug feature) */
-        if (fps_counter_update(&game->fps, current_time)) {
-            float current_fps = fps_counter_get(&game->fps);
+        /* FPS calculation - must increment every frame */
+        frame_count++;
+#if FPS_DISPLAY_ENABLED || FPS_DEBUG_LOG
+        if (current_time - fps_last_time >= FPS_UPDATE_INTERVAL) {
+            current_fps = frame_count * 1000.0f / (current_time - fps_last_time);
+            frame_count = 0;
+            fps_last_time = current_time;
 
 #if FPS_DISPLAY_ENABLED
             char title_buffer[128];
@@ -225,9 +227,10 @@ void engine_run(game_state_t *game) {
                    current_fps, TARGET_FPS, fps_diff);
 #endif
         }
+#endif
 
         /* Store debug values */
-        game->debug_fps = fps_counter_get(&game->fps);
+        game->debug_fps = current_fps;
         game->debug_delta_time = delta_time;
 
         /* Debug output (when enabled) */
