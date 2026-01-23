@@ -1,12 +1,5 @@
 /*
- * Knight Engine 2D - Simple SDL2 Sprite Demo
- *
- * This demonstrates basic SDL2 concepts:
- * - Window and renderer creation
- * - Texture loading and rendering
- * - Game loop structure (events -> update -> render)
- * - Keyboard input handling
- * - Frame rate control
+ * Knight Engine 2D - Main Entry Point
  */
 
 #include <SDL2/SDL.h>
@@ -17,51 +10,10 @@
 #include <string.h>
 #include <math.h>
 
-/* ============================================================================
- * CONFIGURATION - Adjust these values to customize game behavior
- * ============================================================================ */
-
-/* Window settings */
-#define WINDOW_TITLE  "Knight Engine 2D - Sprite Demo"
-#define WINDOW_WIDTH  800
-#define WINDOW_HEIGHT 600
-
-/* Sprite properties */
-#define SPRITE_WIDTH  64
-#define SPRITE_HEIGHT 64
-#define SPRITE_SPEED  300.0f  /* Pixels per second */
-
-/* Player starting position (center of screen if not specified) */
-#define PLAYER_START_X ((WINDOW_WIDTH - SPRITE_WIDTH) / 2.0f)
-#define PLAYER_START_Y ((WINDOW_HEIGHT - SPRITE_HEIGHT) / 2.0f)
-
-/* Frame rate control */
-#define TARGET_FPS        60
-#define FIXED_TIMESTEP    (1.0f / TARGET_FPS)  /* Fixed update rate for physics */
-#define MAX_DELTA_TIME    0.1f   /* Cap delta time to prevent large jumps */
-#define MAX_ACCUMULATOR   0.25f  /* Prevent spiral of death on slow frames */
-
-/* FPS counter settings */
-#define FPS_UPDATE_INTERVAL 500  /* Update FPS display every N milliseconds */
-#define FPS_DISPLAY_ENABLED 1    /* Set to 0 to disable FPS in window title */
-#define FPS_DEBUG_LOG       0    /* Set to 1 to log FPS vs target to console */
-
-/* Asset paths */
-#define PLAYER_TEXTURE_PATH "assets/player.png"
-
-/* Background color (RGB) - grass green */
-#define COLOR_BG_R 34
-#define COLOR_BG_G 139
-#define COLOR_BG_B 34
-
-/* Player sprite fallback color (RGB) - royal blue */
-#define COLOR_PLAYER_R 65
-#define COLOR_PLAYER_G 105
-#define COLOR_PLAYER_B 225
+#include "core/config.h"
 
 /* ============================================================================
- * KEY BINDINGS - Customize controls here
- * Uses SDL_SCANCODE_* values (physical key positions)
+ * KEY BINDINGS - Will move to input/input_config.h in Phase 2
  * ============================================================================ */
 
 /* Movement keys (primary) */
@@ -86,21 +38,11 @@
 #define KEY_CAM_LEFT  SDL_SCANCODE_J
 #define KEY_CAM_RIGHT SDL_SCANCODE_L
 
-/* Camera movement speed */
-#define CAMERA_SPEED 200.0f
-
 /* Debug key */
 #define KEY_DEBUG_TOGGLE SDL_SCANCODE_P
 
-/* Debug output interval (milliseconds) */
-#define DEBUG_OUTPUT_INTERVAL 500
-
-/* STRESS_TEST - Toggle key and sprite count (easy to remove: search "STRESS_TEST") */
+/* STRESS_TEST - Toggle key */
 #define KEY_STRESS_TEST SDL_SCANCODE_T
-#define STRESS_TEST_SPRITE_COUNT 150
-
-/* Input system settings */
-#define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
 
 /* ============================================================================
  * INPUT SYSTEM - Keyboard state tracking with edge detection
@@ -185,13 +127,6 @@ static void world_to_screen(const camera_t *camera, float world_x, float world_y
     *screen_x = (int)(world_x - camera->x);
     *screen_y = (int)(world_y - camera->y);
 }
-
-/* Texture manager settings */
-#define TEXTURE_MAX_ENTRIES  32
-#define TEXTURE_PATH_MAX_LEN 128
-
-/* Sprite list settings */
-#define SPRITE_MAX_COUNT 256  /* Increased for stress testing */
 
 /*
  * Sprite structure - represents any renderable game object
