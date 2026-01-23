@@ -8,8 +8,6 @@
 #include "graphics/sprite.h"
 #include "input/input.h"
 #include "input/input_config.h"
-#include "util/debug.h"
-#include <stdio.h>
 
 void game_process_input(game_state_t *game) {
     const input_state_t *input = &game->input;
@@ -41,17 +39,6 @@ void game_process_input(game_state_t *game) {
 void game_update(game_state_t *game, float delta_time) {
     sprite_t *player = &game->sprites[game->player_index];
     const input_state_t *input = &game->input;
-
-    /* Toggle debug mode with P key */
-    if (input_key_pressed(input, KEY_DEBUG_TOGGLE)) {
-        game->debug_enabled = !game->debug_enabled;
-        printf("[DEBUG] Debug mode %s\n", game->debug_enabled ? "ENABLED" : "DISABLED");
-    }
-
-    /* Toggle stress test with T key */
-    if (input_key_pressed(input, KEY_STRESS_TEST)) {
-        debug_stress_test_toggle(game);
-    }
 
     /* Update camera position (IJKL keys) */
     if (input_key_down(input, KEY_CAM_UP)) {

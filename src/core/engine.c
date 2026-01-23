@@ -193,6 +193,9 @@ void engine_cleanup(game_state_t *game) {
 void engine_run(game_state_t *game) {
     printf("Controls: Arrow keys or WASD to move, P=debug, T=stress test, ESC to quit\n");
 
+    /* Re-initialize FPS counter at loop start for accurate timing */
+    fps_counter_init(&game->fps);
+
     Uint32 last_time = SDL_GetTicks();
     float accumulator = 0.0f;
 
@@ -246,6 +249,15 @@ void engine_run(game_state_t *game) {
         input_update(&game->input);
         engine_handle_events(game);
         game_process_input(game);
+
+        /* Handle discrete input (toggles) - must be per-frame, not fixed timestep */
+        if (input_key_pressed(&game->input, KEY_DEBUG_TOGGLE)) {
+            game->debug_enabled = !game->debug_enabled;
+            printf("[DEBUG] Debug mode %s\n", game->debug_enabled ? "ENABLED" : "DISABLED");
+        }
+        if (input_key_pressed(&game->input, KEY_STRESS_TEST)) {
+            debug_stress_test_toggle(game);
+        }
 
         /* Fixed timestep update loop */
         accumulator += delta_time;
