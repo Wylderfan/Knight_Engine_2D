@@ -14,6 +14,7 @@
 #include "graphics/sprite.h"
 #include "graphics/texture.h"
 #include "input/input.h"
+#include "util/timer.h"
 
 /*
  * Game state structure - holds all game resources and data
@@ -31,6 +32,7 @@ typedef struct game_state_t {
     /* Debug state */
     bool debug_enabled;
     Uint32 debug_last_output;  /* Last time debug info was printed */
+    fps_counter_t fps;         /* FPS tracking */
     float debug_fps;           /* Current FPS for debug display */
     float debug_delta_time;    /* Current delta time for debug display */
     /* STRESS_TEST */
