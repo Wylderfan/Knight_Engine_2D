@@ -78,6 +78,15 @@
 #define KEY_QUIT     SDLK_ESCAPE
 #define KEY_QUIT_ALT SDLK_q
 
+/* Camera movement keys (IJKL) */
+#define KEY_CAM_UP    SDL_SCANCODE_I
+#define KEY_CAM_DOWN  SDL_SCANCODE_K
+#define KEY_CAM_LEFT  SDL_SCANCODE_J
+#define KEY_CAM_RIGHT SDL_SCANCODE_L
+
+/* Camera movement speed */
+#define CAMERA_SPEED 200.0f
+
 /* Input system settings */
 #define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
 
@@ -505,11 +514,9 @@ static bool game_init(game_state_t *game) {
     /* Initialize input system */
     input_init(&game->input);
 
-    /* Initialize camera with test offset to verify camera system works */
-    /* Positive values shift the view right/down in world space */
-    /* (sprites will appear shifted left/up on screen) */
-    game->camera.x = 50.0f;  /* Test offset - set to 0 for normal view */
-    game->camera.y = 50.0f;
+    /* Initialize camera at origin */
+    game->camera.x = 0.0f;
+    game->camera.y = 0.0f;
 
     /* Initialize sprite list */
     game->sprite_count = 0;
@@ -678,23 +685,43 @@ static void game_process_input(game_state_t *game) {
  */
 static void game_update(game_state_t *game, float delta_time) {
     sprite_t *player = &game->sprites[game->player_index];
+    const input_state_t *input = &game->input;
+
+    /* Update camera position (IJKL keys) */
+    if (input_key_down(input, KEY_CAM_UP)) {
+        game->camera.y -= CAMERA_SPEED * delta_time;
+    }
+    if (input_key_down(input, KEY_CAM_DOWN)) {
+        game->camera.y += CAMERA_SPEED * delta_time;
+    }
+    if (input_key_down(input, KEY_CAM_LEFT)) {
+        game->camera.x -= CAMERA_SPEED * delta_time;
+    }
+    if (input_key_down(input, KEY_CAM_RIGHT)) {
+        game->camera.x += CAMERA_SPEED * delta_time;
+    }
 
     /* Update player position based on velocity and delta time */
     player->x += player->vel_x * delta_time;
     player->y += player->vel_y * delta_time;
 
-    /* Clamp player position to screen boundaries */
-    if (player->x < 0) {
-        player->x = 0;
+    /* Clamp player position to camera's visible area (world coordinates) */
+    float cam_left = game->camera.x;
+    float cam_right = game->camera.x + WINDOW_WIDTH - player->width;
+    float cam_top = game->camera.y;
+    float cam_bottom = game->camera.y + WINDOW_HEIGHT - player->height;
+
+    if (player->x < cam_left) {
+        player->x = cam_left;
     }
-    if (player->x > WINDOW_WIDTH - player->width) {
-        player->x = WINDOW_WIDTH - player->width;
+    if (player->x > cam_right) {
+        player->x = cam_right;
     }
-    if (player->y < 0) {
-        player->y = 0;
+    if (player->y < cam_top) {
+        player->y = cam_top;
     }
-    if (player->y > WINDOW_HEIGHT - player->height) {
-        player->y = WINDOW_HEIGHT - player->height;
+    if (player->y > cam_bottom) {
+        player->y = cam_bottom;
     }
 }
 
