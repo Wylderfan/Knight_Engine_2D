@@ -14,13 +14,23 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Output binary to project root for easy access to assets folder
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-# Source files
+# Source files - will grow as we modularize
 set(SOURCES
     src/main.c
+    src/graphics/camera.c
+    src/graphics/renderer.c
+    src/graphics/sprite.c
+    src/graphics/texture.c
+    src/input/input.c
+    src/util/debug.c
+    src/util/timer.c
 )
 
 # Create executable
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+# Include src directory for module headers
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 # Platform-specific SDL2 configuration
 if(APPLE)

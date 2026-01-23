@@ -1,12 +1,5 @@
 /*
- * Knight Engine 2D - Simple SDL2 Sprite Demo
- *
- * This demonstrates basic SDL2 concepts:
- * - Window and renderer creation
- * - Texture loading and rendering
- * - Game loop structure (events -> update -> render)
- * - Keyboard input handling
- * - Frame rate control
+ * Knight Engine 2D - Main Entry Point
  */
 
 #include <SDL2/SDL.h>
@@ -15,551 +8,16 @@
 #include <stdio.h>
 #include <stdlib.h>  /* STRESS_TEST - for rand() */
 #include <string.h>
-#include <math.h>
 
-/* ============================================================================
- * CONFIGURATION - Adjust these values to customize game behavior
- * ============================================================================ */
-
-/* Window settings */
-#define WINDOW_TITLE  "Knight Engine 2D - Sprite Demo"
-#define WINDOW_WIDTH  800
-#define WINDOW_HEIGHT 600
-
-/* Sprite properties */
-#define SPRITE_WIDTH  64
-#define SPRITE_HEIGHT 64
-#define SPRITE_SPEED  300.0f  /* Pixels per second */
-
-/* Player starting position (center of screen if not specified) */
-#define PLAYER_START_X ((WINDOW_WIDTH - SPRITE_WIDTH) / 2.0f)
-#define PLAYER_START_Y ((WINDOW_HEIGHT - SPRITE_HEIGHT) / 2.0f)
-
-/* Frame rate control */
-#define TARGET_FPS        60
-#define FIXED_TIMESTEP    (1.0f / TARGET_FPS)  /* Fixed update rate for physics */
-#define MAX_DELTA_TIME    0.1f   /* Cap delta time to prevent large jumps */
-#define MAX_ACCUMULATOR   0.25f  /* Prevent spiral of death on slow frames */
-
-/* FPS counter settings */
-#define FPS_UPDATE_INTERVAL 500  /* Update FPS display every N milliseconds */
-#define FPS_DISPLAY_ENABLED 1    /* Set to 0 to disable FPS in window title */
-#define FPS_DEBUG_LOG       0    /* Set to 1 to log FPS vs target to console */
-
-/* Asset paths */
-#define PLAYER_TEXTURE_PATH "assets/player.png"
-
-/* Background color (RGB) - grass green */
-#define COLOR_BG_R 34
-#define COLOR_BG_G 139
-#define COLOR_BG_B 34
-
-/* Player sprite fallback color (RGB) - royal blue */
-#define COLOR_PLAYER_R 65
-#define COLOR_PLAYER_G 105
-#define COLOR_PLAYER_B 225
-
-/* ============================================================================
- * KEY BINDINGS - Customize controls here
- * Uses SDL_SCANCODE_* values (physical key positions)
- * ============================================================================ */
-
-/* Movement keys (primary) */
-#define KEY_MOVE_UP     SDL_SCANCODE_UP
-#define KEY_MOVE_DOWN   SDL_SCANCODE_DOWN
-#define KEY_MOVE_LEFT   SDL_SCANCODE_LEFT
-#define KEY_MOVE_RIGHT  SDL_SCANCODE_RIGHT
-
-/* Movement keys (alternate - WASD) */
-#define KEY_MOVE_UP_ALT     SDL_SCANCODE_W
-#define KEY_MOVE_DOWN_ALT   SDL_SCANCODE_S
-#define KEY_MOVE_LEFT_ALT   SDL_SCANCODE_A
-#define KEY_MOVE_RIGHT_ALT  SDL_SCANCODE_D
-
-/* Menu/system keys (uses SDLK_* for key symbols) */
-#define KEY_QUIT     SDLK_ESCAPE
-#define KEY_QUIT_ALT SDLK_q
-
-/* Camera movement keys (IJKL) */
-#define KEY_CAM_UP    SDL_SCANCODE_I
-#define KEY_CAM_DOWN  SDL_SCANCODE_K
-#define KEY_CAM_LEFT  SDL_SCANCODE_J
-#define KEY_CAM_RIGHT SDL_SCANCODE_L
-
-/* Camera movement speed */
-#define CAMERA_SPEED 200.0f
-
-/* Debug key */
-#define KEY_DEBUG_TOGGLE SDL_SCANCODE_P
-
-/* Debug output interval (milliseconds) */
-#define DEBUG_OUTPUT_INTERVAL 500
-
-/* STRESS_TEST - Toggle key and sprite count (easy to remove: search "STRESS_TEST") */
-#define KEY_STRESS_TEST SDL_SCANCODE_T
-#define STRESS_TEST_SPRITE_COUNT 150
-
-/* Input system settings */
-#define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
-
-/* ============================================================================
- * INPUT SYSTEM - Keyboard state tracking with edge detection
- * ============================================================================ */
-
-/*
- * Input state structure - tracks current and previous frame key states
- * Enables detection of key press/release edges, not just held state.
- */
-typedef struct {
-    const Uint8 *current;           /* Pointer to SDL's keyboard state */
-    Uint8 previous[INPUT_MAX_KEYS]; /* Copy of last frame's state */
-    int num_keys;                   /* Number of keys tracked */
-} input_state_t;
-
-/*
- * Initialize the input system
- */
-static void input_init(input_state_t *input) {
-    input->current = SDL_GetKeyboardState(&input->num_keys);
-    memset(input->previous, 0, sizeof(input->previous));
-}
-
-/*
- * Update input state - call once per frame before processing input
- * Copies current state to previous, then SDL updates current automatically.
- */
-static void input_update(input_state_t *input) {
-    /* Copy current state to previous before SDL updates it */
-    for (int i = 0; i < input->num_keys && i < INPUT_MAX_KEYS; i++) {
-        input->previous[i] = input->current[i];
-    }
-    /* SDL_GetKeyboardState pointer stays valid, SDL updates it internally */
-}
-
-/*
- * Check if a key is currently held down
- */
-static bool input_key_down(const input_state_t *input, SDL_Scancode key) {
-    return input->current[key] != 0;
-}
-
-/*
- * Check if a key was just pressed this frame (down now, not down before)
- */
-static bool input_key_pressed(const input_state_t *input, SDL_Scancode key) {
-    return input->current[key] && !input->previous[key];
-}
-
-/*
- * Check if a key was just released this frame (not down now, was down before)
- */
-static bool input_key_released(const input_state_t *input, SDL_Scancode key) {
-    return !input->current[key] && input->previous[key];
-}
-
-/* ============================================================================
- * CAMERA SYSTEM - World vs screen coordinate management
- * ============================================================================
- *
- * Coordinate Systems:
- * - World coordinates: Position in the game world (can extend beyond screen)
- * - Screen coordinates: Position on the visible display (0,0 = top-left)
- *
- * The camera defines which portion of the world is visible on screen.
- * Objects at world position (x, y) appear at screen position (x - camera.x, y - camera.y)
- */
-
-/*
- * Camera structure - defines the visible area of the world
- */
-typedef struct {
-    float x;  /* World x position of camera's top-left corner */
-    float y;  /* World y position of camera's top-left corner */
-} camera_t;
-
-/*
- * Convert world coordinates to screen coordinates
- */
-static void world_to_screen(const camera_t *camera, float world_x, float world_y,
-                            int *screen_x, int *screen_y) {
-    *screen_x = (int)(world_x - camera->x);
-    *screen_y = (int)(world_y - camera->y);
-}
-
-/* Texture manager settings */
-#define TEXTURE_MAX_ENTRIES  32
-#define TEXTURE_PATH_MAX_LEN 128
-
-/* Sprite list settings */
-#define SPRITE_MAX_COUNT 256  /* Increased for stress testing */
-
-/*
- * Sprite structure - represents any renderable game object
- * Combines position, velocity, dimensions, and texture into one unit.
- * Using floats for position/velocity enables smooth sub-pixel movement.
- */
-typedef struct {
-    float x;
-    float y;
-    float vel_x;
-    float vel_y;
-    int width;
-    int height;
-    int z_index;          /* Render order: 0 = background, 50 = entities, 100 = UI */
-    double angle;         /* Rotation in degrees (clockwise) */
-    SDL_RendererFlip flip; /* SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL */
-    SDL_Texture *texture;
-    /* Debug visualization */
-    bool show_debug_bounds;  /* Draw bounding box when debug mode is on */
-    Uint8 debug_r, debug_g, debug_b;  /* Debug border color */
-} sprite_t;
-
-/*
- * Texture entry - stores a loaded texture with its path identifier
- */
-typedef struct {
-    char path[TEXTURE_PATH_MAX_LEN];
-    SDL_Texture *texture;
-    int width;
-    int height;
-} texture_entry_t;
-
-/*
- * Texture manager - simple storage for loaded textures
- * Prevents loading the same texture multiple times and handles cleanup.
- */
-typedef struct {
-    texture_entry_t entries[TEXTURE_MAX_ENTRIES];
-    int count;
-    SDL_Renderer *renderer;
-} texture_manager_t;
-
-/*
- * Game state structure - holds all SDL resources and game data
- */
-typedef struct {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
-    texture_manager_t textures;
-    input_state_t input;
-    camera_t camera;
-    sprite_t sprites[SPRITE_MAX_COUNT];
-    int sprite_count;
-    int player_index;  /* Index of player sprite in the array */
-    SDL_Texture *background;
-    bool running;
-    /* Debug state */
-    bool debug_enabled;
-    Uint32 debug_last_output;  /* Last time debug info was printed */
-    float debug_fps;           /* Current FPS for debug display */
-    float debug_delta_time;    /* Current delta time for debug display */
-    /* STRESS_TEST */
-    bool stress_test_active;
-    int stress_test_base_index;  /* First index of stress test sprites */
-} game_state_t;
-
-/*
- * Render a sprite to the screen
- * Call this for each sprite during the render phase.
- *
- * camera:   Camera for world-to-screen coordinate conversion.
- * src_rect: Optional source rectangle for sprite sheets.
- *           Pass NULL to render the entire texture.
- *           When non-NULL, specifies which portion of the texture to render.
- */
-static void sprite_render(SDL_Renderer *renderer, const sprite_t *sprite,
-                          const camera_t *camera, const SDL_Rect *src_rect) {
-    if (!sprite->texture) {
-        return;
-    }
-
-    int screen_x, screen_y;
-    world_to_screen(camera, sprite->x, sprite->y, &screen_x, &screen_y);
-
-    SDL_Rect dest_rect = {
-        screen_x,
-        screen_y,
-        sprite->width,
-        sprite->height
-    };
-
-    SDL_RenderCopy(renderer, sprite->texture, src_rect, &dest_rect);
-}
-
-/*
- * Render a sprite with extended options (rotation, flip, color modulation)
- *
- * camera:   Camera for world-to-screen coordinate conversion.
- * src_rect:  Optional source rectangle for sprite sheets (NULL = full texture)
- * angle:     Rotation in degrees (clockwise)
- * center:    Point to rotate around (NULL = center of sprite)
- * flip:      SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL, or combined
- * r, g, b:   Color modulation (255 = no change, lower = tint toward that color)
- */
-static void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
-                             const camera_t *camera, const SDL_Rect *src_rect,
-                             double angle, const SDL_Point *center,
-                             SDL_RendererFlip flip, Uint8 r, Uint8 g, Uint8 b) {
-    if (!sprite->texture) {
-        return;
-    }
-
-    int screen_x, screen_y;
-    world_to_screen(camera, sprite->x, sprite->y, &screen_x, &screen_y);
-
-    SDL_Rect dest_rect = {
-        screen_x,
-        screen_y,
-        sprite->width,
-        sprite->height
-    };
-
-    /* Apply color modulation */
-    SDL_SetTextureColorMod(sprite->texture, r, g, b);
-
-    SDL_RenderCopyEx(renderer, sprite->texture, src_rect, &dest_rect,
-                     angle, center, flip);
-
-    /* Reset color modulation to default */
-    SDL_SetTextureColorMod(sprite->texture, 255, 255, 255);
-}
-
-/* ============================================================================
- * DEBUG UTILITIES - Visual debugging tools
- * ============================================================================ */
-
-/*
- * Draw a colored rectangle outline (for collision boxes, debug bounds, etc.)
- * Uses world coordinates - converts to screen space using camera.
- */
-static void debug_draw_rect(SDL_Renderer *renderer, const camera_t *camera,
-                            float world_x, float world_y, int width, int height,
-                            Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
-    int screen_x, screen_y;
-    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
-
-    SDL_Rect rect = { screen_x, screen_y, width, height };
-
-    SDL_SetRenderDrawColor(renderer, r, g, b, a);
-    SDL_RenderDrawRect(renderer, &rect);
-}
-
-/*
- * Draw a filled colored rectangle (for debug visualization)
- * Uses world coordinates - converts to screen space using camera.
- */
-static void debug_fill_rect(SDL_Renderer *renderer, const camera_t *camera,
-                            float world_x, float world_y, int width, int height,
-                            Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
-    int screen_x, screen_y;
-    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
-
-    SDL_Rect rect = { screen_x, screen_y, width, height };
-
-    SDL_SetRenderDrawColor(renderer, r, g, b, a);
-    SDL_RenderFillRect(renderer, &rect);
-}
-
-/*
- * Draw a rotated rectangle outline (for debug bounds on rotated sprites)
- * Angle is in degrees (clockwise), rotation is around the center of the rect.
- */
-static void debug_draw_rect_rotated(SDL_Renderer *renderer, const camera_t *camera,
-                                    float world_x, float world_y, int width, int height,
-                                    double angle, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
-    int screen_x, screen_y;
-    world_to_screen(camera, world_x, world_y, &screen_x, &screen_y);
-
-    /* Center of the rectangle */
-    float cx = screen_x + width / 2.0f;
-    float cy = screen_y + height / 2.0f;
-
-    /* Convert angle to radians (SDL uses clockwise degrees) */
-    double rad = angle * M_PI / 180.0;
-    float cos_a = (float)cos(rad);
-    float sin_a = (float)sin(rad);
-
-    /* Four corners relative to center (before rotation) */
-    float hw = width / 2.0f;
-    float hh = height / 2.0f;
-
-    /* Rotate each corner around center */
-    SDL_Point corners[4];
-    float offsets[4][2] = {
-        { -hw, -hh },  /* Top-left */
-        {  hw, -hh },  /* Top-right */
-        {  hw,  hh },  /* Bottom-right */
-        { -hw,  hh }   /* Bottom-left */
-    };
-
-    for (int i = 0; i < 4; i++) {
-        float rx = offsets[i][0] * cos_a - offsets[i][1] * sin_a;
-        float ry = offsets[i][0] * sin_a + offsets[i][1] * cos_a;
-        corners[i].x = (int)(cx + rx);
-        corners[i].y = (int)(cy + ry);
-    }
-
-    /* Draw lines between corners */
-    SDL_SetRenderDrawColor(renderer, r, g, b, a);
-    SDL_RenderDrawLine(renderer, corners[0].x, corners[0].y, corners[1].x, corners[1].y);
-    SDL_RenderDrawLine(renderer, corners[1].x, corners[1].y, corners[2].x, corners[2].y);
-    SDL_RenderDrawLine(renderer, corners[2].x, corners[2].y, corners[3].x, corners[3].y);
-    SDL_RenderDrawLine(renderer, corners[3].x, corners[3].y, corners[0].x, corners[0].y);
-}
-
-/* ============================================================================
- * TEXTURE MANAGER - Load, cache, and manage textures
- * ============================================================================ */
-
-/*
- * Initialize the texture manager
- */
-static void texture_manager_init(texture_manager_t *tm, SDL_Renderer *renderer) {
-    tm->count = 0;
-    tm->renderer = renderer;
-    for (int i = 0; i < TEXTURE_MAX_ENTRIES; i++) {
-        tm->entries[i].path[0] = '\0';
-        tm->entries[i].texture = NULL;
-        tm->entries[i].width = 0;
-        tm->entries[i].height = 0;
-    }
-}
-
-/*
- * Load a texture from file path
- * Returns the loaded texture, or NULL on failure.
- * Caches textures - subsequent loads of the same path return cached version.
- */
-static SDL_Texture *texture_load(texture_manager_t *tm, const char *path) {
-    /* Check if already loaded */
-    for (int i = 0; i < tm->count; i++) {
-        if (strcmp(tm->entries[i].path, path) == 0) {
-            return tm->entries[i].texture;
-        }
-    }
-
-    /* Check capacity */
-    if (tm->count >= TEXTURE_MAX_ENTRIES) {
-        fprintf(stderr, "Texture manager full, cannot load: %s\n", path);
-        return NULL;
-    }
-
-    /* Load the texture */
-    SDL_Texture *texture = IMG_LoadTexture(tm->renderer, path);
-    if (!texture) {
-        fprintf(stderr, "Failed to load texture '%s': %s\n", path, IMG_GetError());
-        return NULL;
-    }
-
-    /* Enable alpha blending */
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-
-    /* Query texture dimensions */
-    int width, height;
-    SDL_QueryTexture(texture, NULL, NULL, &width, &height);
-
-    /* Store in cache */
-    texture_entry_t *entry = &tm->entries[tm->count];
-    strncpy(entry->path, path, TEXTURE_PATH_MAX_LEN - 1);
-    entry->path[TEXTURE_PATH_MAX_LEN - 1] = '\0';
-    entry->texture = texture;
-    entry->width = width;
-    entry->height = height;
-    tm->count++;
-
-    printf("Loaded texture: %s (%dx%d)\n", path, width, height);
-    return texture;
-}
-
-/*
- * Get a previously loaded texture by path
- * Returns NULL if not found (use texture_load to load first)
- */
-static SDL_Texture *texture_get(texture_manager_t *tm, const char *path) {
-    for (int i = 0; i < tm->count; i++) {
-        if (strcmp(tm->entries[i].path, path) == 0) {
-            return tm->entries[i].texture;
-        }
-    }
-    return NULL;
-}
-
-/*
- * Get texture dimensions by path
- * Returns true if found, false otherwise
- */
-static bool texture_get_size(texture_manager_t *tm, const char *path,
-                             int *width, int *height) {
-    for (int i = 0; i < tm->count; i++) {
-        if (strcmp(tm->entries[i].path, path) == 0) {
-            *width = tm->entries[i].width;
-            *height = tm->entries[i].height;
-            return true;
-        }
-    }
-    return false;
-}
-
-/*
- * Clean up all loaded textures
- */
-static void texture_manager_cleanup(texture_manager_t *tm) {
-    for (int i = 0; i < tm->count; i++) {
-        if (tm->entries[i].texture) {
-            SDL_DestroyTexture(tm->entries[i].texture);
-            tm->entries[i].texture = NULL;
-        }
-        tm->entries[i].path[0] = '\0';
-    }
-    tm->count = 0;
-    printf("Texture manager cleaned up\n");
-}
-
-/* ============================================================================
- * TEXTURE CREATION HELPERS
- * ============================================================================ */
-
-/*
- * Create a colored rectangle texture programmatically
- *
- * SDL surfaces are CPU-side image data that can be manipulated directly.
- * SDL textures are GPU-side and optimized for rendering.
- * We create a surface, fill it with color, then convert to texture.
- */
-static SDL_Texture *create_colored_texture(SDL_Renderer *renderer,
-                                           int width, int height,
-                                           Uint8 r, Uint8 g, Uint8 b) {
-    /* Create a 32-bit RGBA surface */
-    SDL_Surface *surface = SDL_CreateRGBSurface(
-        0,              /* flags (unused) */
-        width, height,  /* dimensions */
-        32,             /* bits per pixel */
-        0x00FF0000,     /* red mask */
-        0x0000FF00,     /* green mask */
-        0x000000FF,     /* blue mask */
-        0xFF000000      /* alpha mask */
-    );
-
-    if (!surface) {
-        fprintf(stderr, "Failed to create surface: %s\n", SDL_GetError());
-        return NULL;
-    }
-
-    /* Fill the surface with the specified color */
-    SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, r, g, b));
-
-    /* Convert surface to texture for GPU-accelerated rendering */
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-
-    /* Free the surface - we only need the texture now */
-    SDL_FreeSurface(surface);
-
-    if (!texture) {
-        fprintf(stderr, "Failed to create texture: %s\n", SDL_GetError());
-    }
-
-    return texture;
-}
+#include "core/config.h"
+#include "core/game_state.h"
+#include "graphics/camera.h"
+#include "graphics/renderer.h"
+#include "graphics/sprite.h"
+#include "graphics/texture.h"
+#include "input/input.h"
+#include "input/input_config.h"
+#include "util/debug.h"
 
 /* STRESS_TEST - Spawns/despawns test sprites for performance testing */
 static void stress_test_toggle(game_state_t *game) {
@@ -579,7 +37,7 @@ static void stress_test_toggle(game_state_t *game) {
         int spawned = 0;
         for (int i = 0; i < STRESS_TEST_SPRITE_COUNT && game->sprite_count < SPRITE_MAX_COUNT; i++) {
             sprite_t *spr = &game->sprites[game->sprite_count++];
-            spr->texture = create_colored_texture(game->renderer, 32, 32,
+            spr->texture = texture_create_colored(renderer_get_sdl(&game->renderer), 32, 32,
                 (Uint8)(rand() % 256), (Uint8)(rand() % 256), (Uint8)(rand() % 256));
             /* Scatter across a larger world area */
             spr->x = (float)(rand() % (WINDOW_WIDTH * 2)) - WINDOW_WIDTH / 2;
@@ -601,60 +59,16 @@ static void stress_test_toggle(game_state_t *game) {
 }
 
 /*
- * Initialize SDL subsystems, create window and renderer
- *
- * The renderer is the core of SDL2's 2D rendering API.
- * It provides hardware-accelerated drawing operations and manages
- * textures on the GPU.
+ * Initialize game - sets up renderer, textures, and initial game state
  */
 static bool game_init(game_state_t *game) {
-    /* Initialize SDL video subsystem */
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return false;
-    }
-
-    /* Initialize SDL_image for PNG loading (optional but nice to have) */
-    int img_flags = IMG_INIT_PNG;
-    if ((IMG_Init(img_flags) & img_flags) != img_flags) {
-        fprintf(stderr, "SDL_image init warning: %s\n", IMG_GetError());
-        /* Continue anyway - we can fall back to programmatic sprites */
-    }
-
-    /* Create the game window */
-    game->window = SDL_CreateWindow(
-        WINDOW_TITLE,                       /* title */
-        SDL_WINDOWPOS_CENTERED,             /* x position */
-        SDL_WINDOWPOS_CENTERED,             /* y position */
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        SDL_WINDOW_SHOWN                    /* flags */
-    );
-
-    if (!game->window) {
-        fprintf(stderr, "Window creation failed: %s\n", SDL_GetError());
-        return false;
-    }
-
-    /*
-     * Create the renderer with hardware acceleration
-     *
-     * SDL_RENDERER_ACCELERATED: Use GPU for rendering
-     * SDL_RENDERER_PRESENTVSYNC: Sync with monitor refresh rate
-     */
-    game->renderer = SDL_CreateRenderer(
-        game->window,
-        -1,  /* Use first available rendering driver */
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
-    );
-
-    if (!game->renderer) {
-        fprintf(stderr, "Renderer creation failed: %s\n", SDL_GetError());
+    /* Initialize rendering system */
+    if (!renderer_init(&game->renderer, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT)) {
         return false;
     }
 
     /* Initialize texture manager */
-    texture_manager_init(&game->textures, game->renderer);
+    texture_manager_init(&game->textures, renderer_get_sdl(&game->renderer));
 
     /* Initialize input system */
     input_init(&game->input);
@@ -683,7 +97,7 @@ static bool game_init(game_state_t *game) {
     if (!player->texture) {
         /* Fallback: create programmatic sprite */
         printf("Creating fallback player sprite\n");
-        player->texture = create_colored_texture(game->renderer,
+        player->texture = texture_create_colored(renderer_get_sdl(&game->renderer),
             SPRITE_WIDTH, SPRITE_HEIGHT,
             COLOR_PLAYER_R, COLOR_PLAYER_G, COLOR_PLAYER_B);
         if (!player->texture) {
@@ -707,7 +121,7 @@ static bool game_init(game_state_t *game) {
 
     /* Add test sprite (index 1) */
     sprite_t *test = &game->sprites[game->sprite_count++];
-    test->texture = create_colored_texture(game->renderer,
+    test->texture = texture_create_colored(renderer_get_sdl(&game->renderer),
         SPRITE_WIDTH, SPRITE_HEIGHT, 255, 100, 100);  /* Red-ish color */
     test->x = 100.0f;
     test->y = 100.0f;
@@ -728,7 +142,7 @@ static bool game_init(game_state_t *game) {
     if (!game->background) {
         /* Fallback: create simple tiled background texture */
         printf("Creating fallback background\n");
-        game->background = create_colored_texture(game->renderer,
+        game->background = texture_create_colored(renderer_get_sdl(&game->renderer),
             WINDOW_WIDTH, WINDOW_HEIGHT,
             COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
     }
@@ -759,22 +173,15 @@ static void game_cleanup(game_state_t *game) {
         }
     }
     if (game->background &&
-        !texture_get(&game->textures, "assets/background.png")) {
+        !texture_get(&game->textures, BACKGROUND_TEXTURE_PATH)) {
         SDL_DestroyTexture(game->background);
     }
 
     /* Clean up texture manager (handles all file-loaded textures) */
     texture_manager_cleanup(&game->textures);
 
-    if (game->renderer) {
-        SDL_DestroyRenderer(game->renderer);
-    }
-    if (game->window) {
-        SDL_DestroyWindow(game->window);
-    }
-
-    IMG_Quit();
-    SDL_Quit();
+    /* Clean up renderer (also calls SDL_Quit and IMG_Quit) */
+    renderer_cleanup(&game->renderer);
 
     printf("Game cleaned up\n");
 }
@@ -921,14 +328,14 @@ static void game_update(game_state_t *game, float delta_time) {
  * 3. Present the frame (swap buffers to display)
  */
 static void game_render(game_state_t *game) {
+    SDL_Renderer *sdl_renderer = renderer_get_sdl(&game->renderer);
+
     /* Clear screen with background color */
-    SDL_SetRenderDrawColor(game->renderer,
-                           COLOR_BG_R, COLOR_BG_G, COLOR_BG_B, 255);
-    SDL_RenderClear(game->renderer);
+    renderer_clear(&game->renderer, COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
 
     /* Render background texture (covers full window) */
     if (game->background) {
-        SDL_RenderCopy(game->renderer, game->background, NULL, NULL);
+        SDL_RenderCopy(sdl_renderer, game->background, NULL, NULL);
     }
 
     /* Render all sprites sorted by z_index (lower z renders first = behind) */
@@ -937,16 +344,16 @@ static void game_render(game_state_t *game) {
             sprite_t *spr = &game->sprites[i];
             if (spr->z_index == z) {
                 if (spr->angle != 0.0 || spr->flip != SDL_FLIP_NONE) {
-                    sprite_render_ex(game->renderer, spr, &game->camera, NULL,
+                    sprite_render_ex(sdl_renderer, spr, &game->camera, NULL,
                                      spr->angle, NULL, spr->flip,
                                      255, 255, 255);
                 } else {
-                    sprite_render(game->renderer, spr, &game->camera, NULL);
+                    sprite_render(sdl_renderer, spr, &game->camera, NULL);
                 }
 
                 /* Draw debug bounds when debug mode is enabled */
                 if (game->debug_enabled && spr->show_debug_bounds) {
-                    debug_draw_rect_rotated(game->renderer, &game->camera,
+                    debug_draw_rect_rotated(sdl_renderer, &game->camera,
                                             spr->x, spr->y, spr->width, spr->height,
                                             spr->angle,
                                             spr->debug_r, spr->debug_g, spr->debug_b, 255);
@@ -955,8 +362,8 @@ static void game_render(game_state_t *game) {
         }
     }
 
-    /* Present the frame - this displays everything we've drawn */
-    SDL_RenderPresent(game->renderer);
+    /* Present the frame */
+    renderer_present(&game->renderer);
 }
 
 /*
@@ -1025,7 +432,7 @@ int main(int argc, char *argv[]) {
             char title_buffer[128];
             snprintf(title_buffer, sizeof(title_buffer), "%s - %.1f FPS",
                      WINDOW_TITLE, current_fps);
-            SDL_SetWindowTitle(game.window, title_buffer);
+            renderer_set_title(&game.renderer, title_buffer);
 #endif
 
 #if FPS_DEBUG_LOG
