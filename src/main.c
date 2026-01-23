@@ -75,7 +75,66 @@
 #define KEY_MOVE_RIGHT_ALT  SDL_SCANCODE_D
 
 /* Menu/system keys (uses SDLK_* for key symbols) */
-#define KEY_QUIT SDLK_ESCAPE
+#define KEY_QUIT     SDLK_ESCAPE
+#define KEY_QUIT_ALT SDLK_q
+
+/* Input system settings */
+#define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
+
+/* ============================================================================
+ * INPUT SYSTEM - Keyboard state tracking with edge detection
+ * ============================================================================ */
+
+/*
+ * Input state structure - tracks current and previous frame key states
+ * Enables detection of key press/release edges, not just held state.
+ */
+typedef struct {
+    const Uint8 *current;           /* Pointer to SDL's keyboard state */
+    Uint8 previous[INPUT_MAX_KEYS]; /* Copy of last frame's state */
+    int num_keys;                   /* Number of keys tracked */
+} input_state_t;
+
+/*
+ * Initialize the input system
+ */
+static void input_init(input_state_t *input) {
+    input->current = SDL_GetKeyboardState(&input->num_keys);
+    memset(input->previous, 0, sizeof(input->previous));
+}
+
+/*
+ * Update input state - call once per frame before processing input
+ * Copies current state to previous, then SDL updates current automatically.
+ */
+static void input_update(input_state_t *input) {
+    /* Copy current state to previous before SDL updates it */
+    for (int i = 0; i < input->num_keys && i < INPUT_MAX_KEYS; i++) {
+        input->previous[i] = input->current[i];
+    }
+    /* SDL_GetKeyboardState pointer stays valid, SDL updates it internally */
+}
+
+/*
+ * Check if a key is currently held down
+ */
+static bool input_key_down(const input_state_t *input, SDL_Scancode key) {
+    return input->current[key] != 0;
+}
+
+/*
+ * Check if a key was just pressed this frame (down now, not down before)
+ */
+static bool input_key_pressed(const input_state_t *input, SDL_Scancode key) {
+    return input->current[key] && !input->previous[key];
+}
+
+/*
+ * Check if a key was just released this frame (not down now, was down before)
+ */
+static bool input_key_released(const input_state_t *input, SDL_Scancode key) {
+    return !input->current[key] && input->previous[key];
+}
 
 /* Texture manager settings */
 #define TEXTURE_MAX_ENTRIES  32
@@ -129,6 +188,7 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     texture_manager_t textures;
+    input_state_t input;
     sprite_t sprites[SPRITE_MAX_COUNT];
     int sprite_count;
     int player_index;  /* Index of player sprite in the array */
@@ -404,6 +464,9 @@ static bool game_init(game_state_t *game) {
     /* Initialize texture manager */
     texture_manager_init(&game->textures, game->renderer);
 
+    /* Initialize input system */
+    input_init(&game->input);
+
     /* Initialize sprite list */
     game->sprite_count = 0;
 
@@ -520,7 +583,8 @@ static void game_handle_events(game_state_t *game) {
 
             case SDL_KEYDOWN:
                 /* Handle single key press events */
-                if (event.key.keysym.sym == KEY_QUIT) {
+                if (event.key.keysym.sym == KEY_QUIT ||
+                    event.key.keysym.sym == KEY_QUIT_ALT) {
                     game->running = false;
                 }
                 break;
@@ -531,12 +595,11 @@ static void game_handle_events(game_state_t *game) {
 /*
  * Process continuous input (held keys)
  *
- * SDL_GetKeyboardState returns a snapshot of all keyboard keys.
- * This is better for movement than events because it handles
- * held keys smoothly without relying on key repeat.
+ * Uses the input system for clean key state checking.
+ * input_key_down() checks if a key is currently held.
  */
 static void game_process_input(game_state_t *game) {
-    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    const input_state_t *input = &game->input;
     sprite_t *player = &game->sprites[game->player_index];
 
     /* Reset velocity each frame */
@@ -544,16 +607,20 @@ static void game_process_input(game_state_t *game) {
     player->vel_y = 0.0f;
 
     /* Check movement keys and set velocity */
-    if (keys[KEY_MOVE_UP] || keys[KEY_MOVE_UP_ALT]) {
+    if (input_key_down(input, KEY_MOVE_UP) ||
+        input_key_down(input, KEY_MOVE_UP_ALT)) {
         player->vel_y = -SPRITE_SPEED;
     }
-    if (keys[KEY_MOVE_DOWN] || keys[KEY_MOVE_DOWN_ALT]) {
+    if (input_key_down(input, KEY_MOVE_DOWN) ||
+        input_key_down(input, KEY_MOVE_DOWN_ALT)) {
         player->vel_y = SPRITE_SPEED;
     }
-    if (keys[KEY_MOVE_LEFT] || keys[KEY_MOVE_LEFT_ALT]) {
+    if (input_key_down(input, KEY_MOVE_LEFT) ||
+        input_key_down(input, KEY_MOVE_LEFT_ALT)) {
         player->vel_x = -SPRITE_SPEED;
     }
-    if (keys[KEY_MOVE_RIGHT] || keys[KEY_MOVE_RIGHT_ALT]) {
+    if (input_key_down(input, KEY_MOVE_RIGHT) ||
+        input_key_down(input, KEY_MOVE_RIGHT_ALT)) {
         player->vel_x = SPRITE_SPEED;
     }
 }
@@ -703,6 +770,9 @@ int main(int argc, char *argv[]) {
 #endif
         }
 #endif
+
+        /* Update input state (must be called before processing input) */
+        input_update(&game.input);
 
         /* Handle events and input (once per frame) */
         game_handle_events(&game);
