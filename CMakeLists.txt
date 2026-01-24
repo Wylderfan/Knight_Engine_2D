@@ -23,6 +23,7 @@ set(SOURCES
     src/graphics/renderer.c
     src/graphics/sprite.c
     src/graphics/texture.c
+    src/graphics/tile.c
     src/input/input.c
     src/util/debug.c
     src/util/timer.c
