@@ -91,6 +91,15 @@
 #define INPUT_MAX_KEYS 512  /* SDL scancodes fit in this range */
 
 /* ============================================================================
+ * TILE SETTINGS
+ * ============================================================================ */
+
+#define TILE_SIZE             128   /* Tile dimensions in pixels (128x128) */
+#define TILE_MAX_DEFINITIONS  256   /* Maximum tile types in a tileset */
+#define TILE_MAX_LAYERS       8     /* Maximum layers in a tilemap */
+#define TILE_NAME_MAX_LEN     32    /* Maximum length for tile type names */
+
+/* ============================================================================
  * STRESS TEST SETTINGS (can be removed when not needed)
  * ============================================================================ */
 
