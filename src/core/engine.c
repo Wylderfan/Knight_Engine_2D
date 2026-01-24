@@ -49,26 +49,26 @@ static void engine_render(game_state_t *game) {
         SDL_RenderCopy(sdl_renderer, game->background, NULL, NULL);
     }
 
-    /* Render all sprites sorted by z_index */
-    for (int z = 0; z <= 100; z++) {
-        for (int i = 0; i < game->sprite_count; i++) {
-            sprite_t *spr = &game->sprites[i];
-            if (spr->z_index == z) {
-                if (spr->angle != 0.0 || spr->flip != SDL_FLIP_NONE) {
-                    sprite_render_ex(sdl_renderer, spr, &game->camera, NULL,
-                                     spr->angle, NULL, spr->flip,
-                                     255, 255, 255);
-                } else {
-                    sprite_render(sdl_renderer, spr, &game->camera, NULL);
-                }
+    /* Sort sprites by z_index using quicksort - O(n log n) */
+    sprite_sort_by_z(game->sprites, game->render_order, game->sprite_count);
 
-                if (game->debug_enabled && spr->show_debug_bounds) {
-                    debug_draw_rect_rotated(sdl_renderer, &game->camera,
-                                            spr->x, spr->y, spr->width, spr->height,
-                                            spr->angle,
-                                            spr->debug_r, spr->debug_g, spr->debug_b, 255);
-                }
-            }
+    /* Render all sprites in sorted order - O(n) */
+    for (int i = 0; i < game->sprite_count; i++) {
+        sprite_t *spr = &game->sprites[game->render_order[i]];
+
+        if (spr->angle != 0.0 || spr->flip != SDL_FLIP_NONE) {
+            sprite_render_ex(sdl_renderer, spr, &game->camera, NULL,
+                             spr->angle, NULL, spr->flip,
+                             255, 255, 255);
+        } else {
+            sprite_render(sdl_renderer, spr, &game->camera, NULL);
+        }
+
+        if (game->debug_enabled && spr->show_debug_bounds) {
+            debug_draw_rect_rotated(sdl_renderer, &game->camera,
+                                    spr->x, spr->y, spr->width, spr->height,
+                                    spr->angle,
+                                    spr->debug_r, spr->debug_g, spr->debug_b, 255);
         }
     }
 
