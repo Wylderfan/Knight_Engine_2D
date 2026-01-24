@@ -27,6 +27,7 @@ typedef struct game_state_t {
     sprite_t sprites[SPRITE_MAX_COUNT];
     int sprite_count;
     int player_index;  /* Index of player sprite in the array */
+    int render_order[SPRITE_MAX_COUNT];  /* Indices sorted by z_index for rendering */
     SDL_Texture *background;
     bool running;
     /* Debug state */

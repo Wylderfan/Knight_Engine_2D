@@ -60,3 +60,14 @@ void sprite_render_ex(SDL_Renderer *renderer, const sprite_t *sprite,
                       const camera_t *camera, const SDL_Rect *src_rect,
                       double angle, const SDL_Point *center,
                       SDL_RendererFlip flip, Uint8 r, Uint8 g, Uint8 b);
+
+/*
+ * Sort sprite indices by z_index using quicksort
+ * Populates render_order with indices sorted by ascending z_index.
+ * Time complexity: O(n log n) average case.
+ *
+ * sprites:      Array of sprites to reference for z_index values
+ * render_order: Output array of indices, sorted by z_index
+ * count:        Number of sprites
+ */
+void sprite_sort_by_z(const sprite_t *sprites, int *render_order, int count);
